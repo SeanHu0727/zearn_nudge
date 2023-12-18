@@ -88,7 +88,7 @@ teacher_student_usage_subset %>%
 # Perform regression with Badges as the outcome and weekday frequencies as predictors
 # specify the model with mixed effects
 library(lme4)
-# specify the fixed effects model
+# specify the fixed effects model (!!! this one is without constant term == wrong)
 # fixed_model <- lm(Badges.per.Active.User ~ 0 + `1` + `2` + `3` + `4` + `5` + `6` + `7` + `8` + `9` + `10` + `11` +
 #                     mon + tue + wed + thu + fri + sat +
 #                     streak + streak_dow + time_lag + prev_week_visits + prev_min_zearn +
@@ -100,6 +100,10 @@ fixed_model <- lm(Badges.per.Active.User ~ `1` + `2` + `3` + `4` + `5` + `6` + `
                     factor(MDR.School.ID), data = data_with_badges)
 
 summary(fixed_model)
+sd(data_with_badges$fri) # 0.06177653
+sd(data_with_badges$Badges.per.Active.User) # 1.004252
+0.06177653/1.004252 =  0.06151497
+0.06151497 * 1.718 = 0.1056827
 
 fixed_model <- lm(Badges.per.Active.User ~ `1` + `2` + `3` + `4` + `5` + `6` + `7` + `8` + `9` + `10` + `11` +
                     mon + tue + wed + thu + fri + sat +

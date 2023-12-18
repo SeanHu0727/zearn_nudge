@@ -337,4 +337,13 @@ ols <- plm(fmla, data = teacher_student_usage_subset, index = c("Classroom.ID", 
 within <- update(ols, model = "within")
 # fixed-effect
 summary(within)
-  
+sd(teacher_student_usage_subset$ica1)
+sd(teacher_student_usage_subset$ica2)
+sd(teacher_student_usage_subset$ica3)
+sd(log(teacher_student_usage_subset$Badges.per.Active.User+1))
+1.000004/0.589562 = 1.696181
+
+0.310, 0.118, 0.067
+1.696181*0.183*.897 + 1.696181*0.070*0.042 +1.696181*0.040*(-0.027) = 0.2815847
+
+
