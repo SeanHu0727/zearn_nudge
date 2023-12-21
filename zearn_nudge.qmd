@@ -1,0 +1,363 @@
+---
+title: "zearn_nudge"
+format: pdf
+---
+
+```{r import}
+library(tidyverse)
+library(zoo)
+library(gt)
+library(fastICA)
+set.seed(794563797)
+# Timestamp: 2023-12-21 21:42:25 UTC
+# © 1998-2023 RANDOM.ORG
+
+teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
+classroom_student_usage <- read.csv("Data/raw/Classroom Student Usage - Time Series 2020-10-09T1616.csv")
+classroom_info <- read.csv("Data/raw/Classroom Info 2020-10-09T1617.csv")
+classroom_teacher_lookup <- read.csv("Data/raw/Classroom-Teacher Lookup 2020-10-09T1618.csv")
+school_info <- read.csv("Data/raw/School Info 2020-10-09T1619.csv")
+la_usage_types <- read_csv("Data/raw/la_usage_types.csv")
+```
+
+## Methods
+
+### Study 1
+
+#### Data Collection
+
+  -   Source and timeframe of data.
+  -   Specific teacher and student metrics collected.
+  -   Data cleaning and preprocessing steps.
+  -   Depositing of Raw Data: Ensure all raw data is available in a publicly accessible database.
+  -   Criteria for selecting and excluding data points or subjects.
+
+This dataset forms the basis for assessing the impact of our upcoming experimental intervention aimed at enhancing teaching methodologies and student learning outcomes.
+
+```{r preprocessing}
+teacher_usage <- teacher_usage %>%
+  mutate(
+    # Noting week, month, and year to summarize teacher behavior:
+    week = lubridate::week(Usage.Time),
+    year = lubridate::year(Usage.Time),
+    wday = lubridate::wday(Usage.Time),
+    hour = lubridate::hour(Usage.Time),
+    whour = (wday - 1)*24 + hour,
+    # Transforming Event.Type for "Resource Downloaded"
+    Event.Type = ifelse(Event.Type == "Resource Downloaded",
+                        paste("RD.", Curriculum.Resource.Category),
+                        Event.Type)
+    )
+
+# Summarize teacher behavior
+teacher_usage_total <- teacher_usage %>%
+  count(Adult.User.ID, Event.Type, week, year) %>%
+  pivot_wider(names_from = Event.Type, values_from = n, values_fill = list(n = 0))
+
+# Merge teacher and student data
+# Merging with the classroom info for further merge with teacher info
+teacher_student_usage_subset <- classroom_student_usage %>%
+  inner_join(classroom_teacher_lookup, by = "Classroom.ID") %>%
+  mutate(week = lubridate::week(Usage.Week),
+         year = lubridate::year(Usage.Week)) %>%
+  inner_join(teacher_usage_total, by = c("Teacher.User.ID" = "Adult.User.ID",
+                                        "week", "year"))
+
+# Adding the number of classrooms each teacher has
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  inner_join(classroom_teacher_lookup %>%
+              count(Teacher.User.ID) %>%
+              rename(teacher.number.classes = n),
+            by = "Teacher.User.ID")
+
+# Adding the classrooms types
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  inner_join(classroom_info, by = "Classroom.ID") %>%
+  mutate(
+    Grade.Level = factor(Grade.Level, ordered = TRUE)
+    )
+
+# Process la_usage_types
+la_usage_types <- la_usage_types %>%
+  mutate(
+    curriculum = as.integer(`Schools and Districts Usage Type` %in%
+                              c("20-21 Curriculum", "Core Complement"))
+    )
+
+# Further data merging
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  left_join(la_usage_types %>%
+              mutate(`Schools and Districts MDR School ID` =
+                       as.integer(`Schools and Districts MDR School ID`)),
+            by = c("MDR.School.ID" = "Schools and Districts MDR School ID")) %>%
+  select(!`Schools and Districts Usage Type`) %>%
+  left_join(school_info %>% 
+              select(MDR.School.ID, Demographics...Zipcode.Median.Income),
+            by = "MDR.School.ID") %>%
+  mutate(Demographics...Zipcode.Median.Income =
+           factor(Demographics...Zipcode.Median.Income,
+                  ordered = TRUE))
+
+# Processing students' data
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  mutate(month = month(Usage.Week)) %>%
+  # Remove June/July/August
+  filter(!month %in% c(6, 7, 8))
+
+# Filtering active classrooms
+active_classrooms <- teacher_student_usage_subset %>%
+  count(Classroom.ID) %>%
+  # Remove classes inactive for more than 7 months
+  filter(n > 20) %>%
+  pull(Classroom.ID)
+
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  filter(Classroom.ID %in% active_classrooms)
+
+average_student <- teacher_student_usage_subset %>%
+  group_by(Classroom.ID) %>%
+  summarise(Active.Users...Total = mean(Active.Users...Total)) %>%
+  # More than 5 active students on average
+  filter(Active.Users...Total > 5)
+
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  filter(Classroom.ID %in% average_student$Classroom.ID)
+
+# Remove duplicate classroom-week pairs (classrooms with more than one teacher)
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  mutate(unique_id = paste(Classroom.ID, Usage.Week)) %>%
+  filter(!duplicated(unique_id))
+
+# Replace NAs with 0 and remove small classrooms
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User), 0, Badges.per.Active.User)) %>%
+  filter(Students...Total > 5)
+```
+  
+#### Summary Statistics
+
+```{r}
+#| label: tbl-summary
+#| tbl-cap: "Pre-experimental Intervention Data. This table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
+
+# Pre-calculate unique teachers and classrooms
+unique_teachers <- unique(teacher_student_usage_subset$Teacher.User.ID)
+unique_classrooms <- unique(
+  teacher_student_usage_subset[, c('Teacher.User.ID', 'Classroom.ID')]
+  )
+
+# Statistics for "# of classes"
+n_teachers <- length(unique_teachers)
+n_classes <- nrow(unique_classrooms)
+mean_classes <- n_classes / n_teachers
+classes_per_teacher <- unique_classrooms %>% count(Teacher.User.ID)
+
+# Statistics for "# of badges"
+teacher_student_usage_subset$Total.Badges <- 
+  teacher_student_usage_subset$Active.Users...Total *
+  teacher_student_usage_subset$Badges.per.Active.User
+badges_per_teacher <- teacher_student_usage_subset %>% 
+  group_by(Teacher.User.ID) %>% 
+  summarize(Total.Badges = sum(Total.Badges))
+
+# Statistics for "Total minutes on Zearn"
+minutes_per_teacher <- teacher_usage %>%
+  filter(!Adult.User.ID %in% unique_teachers) %>%
+  group_by(Adult.User.ID) %>%
+  summarize(Total.Minutes = sum(Minutes.on.Zearn...Total))
+
+# Creating a function for common statistics
+calculate_stats <- function(data, value) {
+  list(
+    N = sum(data[[value]]),
+    Mean = mean(data[[value]]),
+    SD = sd(data[[value]]),
+    Quantiles = quantile(data[[value]], probs = c(0.25, 0.5, 0.75))
+  )
+}
+
+# Calculating statistics
+stats_classes <- calculate_stats(classes_per_teacher, "n")
+stats_badges <- calculate_stats(badges_per_teacher, "Total.Badges")
+stats_minutes <- calculate_stats(minutes_per_teacher, "Total.Minutes")
+
+# Formatting the table with gt
+gt_table <- tibble(
+  Category = c("# of teachers", "# of classes", "# of badges", "Total minutes on Zearn"),
+  N = c(n_teachers, stats_classes$N, stats_badges$N, stats_minutes$N),
+  Mean = c(NA, stats_classes$Mean, stats_badges$Mean, stats_minutes$Mean),
+  `Standard Deviation` = c(NA, stats_classes$SD, stats_badges$SD, stats_minutes$SD),
+  `1st Quartile` = c(NA, stats_classes$Quantiles[1], stats_badges$Quantiles[1], stats_minutes$Quantiles[1]),
+  `2nd Quartile` = c(NA, stats_classes$Quantiles[2], stats_badges$Quantiles[2], stats_minutes$Quantiles[2]),
+  `3rd Quartile` = c(NA, stats_classes$Quantiles[3], stats_badges$Quantiles[3], stats_minutes$Quantiles[3])
+) %>%
+  gt() %>%
+  tab_spanner(
+    label = "Aggregated Statistics per Teacher",
+    columns = c("Mean", "Standard Deviation", "1st Quartile", "2nd Quartile", "3rd Quartile")
+  ) %>%
+  cols_label(
+    Category = "",
+    N = "N",
+    Mean = "Mean",
+    `Standard Deviation` = "Standard Deviation",
+    `1st Quartile` = "1st Quartile",
+    `2nd Quartile` = "2nd Quartile",
+    `3rd Quartile` = "3rd Quartile"
+  ) %>%
+  fmt_number(
+    columns = c("N"),
+    decimals = 0
+  ) %>%
+  fmt_number(
+    columns = c("Mean", "Standard Deviation"),
+    decimals = 2,
+    use_seps = TRUE
+  ) %>%
+  fmt_number(
+    columns = c("1st Quartile", "2nd Quartile", "3rd Quartile"),
+    decimals = 1
+  ) %>%
+  sub_missing(
+    columns = c("Mean", "Standard Deviation", "1st Quartile", "2nd Quartile", "3rd Quartile"),
+    missing_text = "-"
+  )
+
+# Display the table
+gt_table
+
+```
+
+### Study 1a: Data-driven Nudge Engineering with PCA
+
+#### PCA Execution:
+  -   Selection criteria for variables included in PCA.
+  -   Step-by-step PCA process.
+  -   Software and version used for PCA.
+
+```{r}
+
+# Perform ICA and PCA
+ica_result <- fastICA(X = teacher_student_usage_subset[14:39],
+                      n.comp = 3, row.norm = TRUE)
+pca_result <- prcomp(teacher_student_usage_subset[14:39], tol = 0.1)
+prop_variance <- summary(pca_result)$importance[2, 1:10]
+
+# Create Elbow Plot with ggplot2
+elbow_plot <- ggplot(data.frame(Cluster = 1:10, Variance = prop_variance), aes(x = Cluster, y = Variance)) +
+  geom_point() +
+  geom_line(color = "blue") +
+  labs(x = "N-th Cluster", y = "Proportion of Variance", title = "Elbow Method for Determining Optimal k") +
+  theme_minimal()
+
+# Save plot to a file (Uncomment to save the plot)
+# ggsave("/Users/sean/Desktop/zearn_nudge/robustness_check/Elbow_plot.png", elbow_plot, dpi = 120)
+
+# Add ICA components to the dataset
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  mutate(
+    ica1 = ica_result$S[, 1],
+    ica2 = ica_result$S[, 2],
+    ica3 = ica_result$S[, 3]
+  )
+
+# Return ICA mixing matrix
+ica_result$A
+
+
+ica <- fastICA(X = teacher_student_usage_subset[c(14:39)], n.comp=3, row.norm = TRUE)
+#ica8 <- fastICA(X = teacher_student_usage_subset[c(13:39)], n.comp=8, row.norm = TRUE)
+pca <- prcomp(teacher_student_usage_subset[c(14:39)], tol = 0.1)
+prop_variance = summary(pca)$importance[2,][1:10]
+
+# png("/Users/sean/Desktop/zearn_nudge/robustness_check/Elbow_plot.png",res = 120)
+x <- 1:10
+plot(x, prop_variance, type = "b", pch = 19,
+     col = "blue", xlab = "N-th cluster", ylab = "Proportion of Variance",
+     main="Elbow method for\n determining optimal k")
+# dev.off()
+
+
+ica.comps <- data.frame(ica$S)
+teacher_student_usage_subset$ica1 <- ica.comps$X1
+teacher_student_usage_subset$ica2 <- ica.comps$X2
+teacher_student_usage_subset$ica3 <- ica.comps$X3
+ica$A
+```
+
+#### **Statistical Considerations**:
+  -   Explanation of statistical models used.
+  -   Justification of model choices.
+  -   Details of any sensitivity or robustness checks.
+  -   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
+
+### Study 1b: Data-driven Nudge Engineering with Habit-based Regression
+
+#### **Data Utilization**:
+    -   Criteria for data selection.
+    -   Description of data preprocessing.
+    -   Pre-registration of Study: If applicable, mention if this study was pre-registered.
+#### **Regression Analysis Methodology**:
+    -   Detailed steps in the regression analysis.
+    -   Explanation of fixed effects model.
+    -   Software and tools used in analysis.
+    -   Publishing Negative Data: Include any negative data that did not support hypotheses.
+#### **Statistical Tools and Software**:
+    -   List of all statistical software and tools.
+    -   Versions and settings used.
+    -   Thorough Description of Methods: Clearly report experimental parameters.
+
+### Study 2a: Nudge Engineering / Increasing Engagement Through Empathy
+
+#### **Pre-registration Details**:
+    -   Date created: September 14, 2021.
+    -   Confirmation that no data were collected prior to the study.
+    -   Hypotheses: H1 and H2 with detailed descriptions.
+    -   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
+    -   Conditions: Description of "Empathy" treatment and "Control Condition".
+    -   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
+    -   Outliers and Exclusions: Specific criteria for exclusion of observations.
+    -   Sample Size: Number of participants and criteria for eligibility.
+    -   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+#### **Intervention Design**:
+    -   Steps in developing empathy-based interventions.
+    -   Criteria for intervention selection.
+#### **Implementation Method**:
+    -   Detailed procedure for implementing interventions.
+    -   Timeline and phases of implementation.
+#### **Evaluation Technique**:
+    -   Methods of measuring intervention impact.
+    -   Statistical analysis of results.
+    -   Detailed Reporting of Methodologies: Include comprehensive description of all methodologies used.
+#### **Outcome Measure**:
+    -   Specific measures used to evaluate the impact of interventions.
+#### **IRB Information**:
+    -   Details of Institutional Review Board (IRB) approvals and ethical considerations, if applicable.
+
+### Study 2b: Nudge Engineering / Increasing Engagement Through Habitization
+
+#### **Pre-registration Details**:
+    -   Date created: September 14, 2021.
+    -   Confirmation that no data were collected prior to the study.
+    -   Hypotheses: H1, H2, and H3 with detailed descriptions.
+    -   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
+    -   Conditions: Description of "Friday log-in", "Wednesday log-in", and "Control Condition".
+    -   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
+    -   Outliers and Exclusions: Specific criteria for exclusion of observations.
+    -   Sample Size: Number of participants and criteria for eligibility.
+    -   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+#### **Nudge Development Process**:
+    -   Detailed steps in nudge creation.
+    -   Basis for selecting specific nudges.
+#### **Application Protocol**:
+    -   Procedure for nudge application.
+    -   Monitoring and adaptation strategies.
+#### **Impact Assessment Method**:
+    -   Techniques for evaluating nudge effectiveness.
+    -   Statistical methods for analyzing outcomes.
+    -   Comprehensive Methodological Reporting: Ensure thorough reporting of all methods and experimental parameters.
+#### **Outcome Measure**:
+    -   Specific measures used to evaluate the impact of interventions.
+#### **IRB Information**:
+    -   Details of Institutional Review Board (IRB) approvals and ethical considerations, if applicable.
+

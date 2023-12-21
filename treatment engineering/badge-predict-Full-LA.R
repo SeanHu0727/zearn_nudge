@@ -7,16 +7,15 @@ library(tidyverse)
 library(zoo)
 
 ## Importing files:
-setwd("/Users/sean/Desktop/zearn_nudge/raw_data")
-teacher_usage <- read.csv("Teacher Usage - Time Series 2020-10-09T1635.csv")
-classroom_student_usage <- read.csv("Classroom Student Usage - Time Series 2020-10-09T1616.csv")
-classroom_info <- read.csv("Classroom Info 2020-10-09T1617.csv")
-classroom_teacher_lookup <- read.csv("Classroom-Teacher Lookup 2020-10-09T1618.csv")
+teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
+classroom_student_usage <- read.csv("Data/raw/Classroom Student Usage - Time Series 2020-10-09T1616.csv")
+classroom_info <- read.csv("Data/raw/Classroom Info 2020-10-09T1617.csv")
+classroom_teacher_lookup <- read.csv("Data/raw/Classroom-Teacher Lookup 2020-10-09T1618.csv")
 #teacher_info <- read.csv("Data/raw/2019/Teacher Info 20182019.csv")
-school_info <- read.csv("School Info 2020-10-09T1619.csv")
+school_info <- read.csv("Data/raw/School Info 2020-10-09T1619.csv")
 # has_account <- school_info$MDR.School.ID[school_info$Has.School.Account..Yes...No. == "Yes"]
 # classroom_has_account <- classroom_info$Classroom.ID[classroom_info$MDR.School.ID %in% has_account]
-la_usage_types <- read_csv("la_usage_types.csv")
+la_usage_types <- read_csv("Data/raw/la_usage_types.csv")
 
 #####################################
 ### TEACHERS
@@ -26,7 +25,7 @@ classroom_student_usage_subset <- merge(classroom_student_usage, classroom_teach
 classroom_student_usage_subset$week = lubridate::week(classroom_student_usage_subset$Usage.Week)
 classroom_student_usage_subset$year = lubridate::year(classroom_student_usage_subset$Usage.Week)
 
-# Noting week, month, and year to summarize teacher behavior: 
+# Noting week, month, and year to summarize teacher behavior:
 teacher_usage$week = lubridate::week(teacher_usage$Usage.Time)
 teacher_usage$year = lubridate::year(teacher_usage$Usage.Time)
 teacher_usage$wday = lubridate::wday(teacher_usage$Usage.Time)
@@ -36,24 +35,24 @@ teacher_usage$whour = (teacher_usage$wday - 1)*24 + teacher_usage$hour
 
 # Find total behavior per week per teacher
 teacher_usage$Event.Type[teacher_usage$Event.Type == "Resource Downloaded"] <- paste("RD.",teacher_usage$Curriculum.Resource.Category[teacher_usage$Event.Type == "Resource Downloaded"])
-teacher_usage_total <- teacher_usage %>% 
-  group_by(Adult.User.ID,Event.Type,week,year) %>% 
-  summarise(Freq=n()) %>% 
+teacher_usage_total <- teacher_usage %>%
+  group_by(Adult.User.ID,Event.Type,week,year) %>%
+  summarise(Freq=n()) %>%
   pivot_wider(id_cols = c(Adult.User.ID,week,year), names_from = Event.Type, values_from = Freq)
 # Replace NAs with 0
 teacher_usage_total[is.na(teacher_usage_total)] <- 0
 
 # Merge teacher and student data
-teacher_student_usage_subset <- merge(classroom_student_usage_subset, teacher_usage_total, 
+teacher_student_usage_subset <- merge(classroom_student_usage_subset, teacher_usage_total,
                                       by.x = c("Teacher.User.ID","week","year"), by.y = c("Adult.User.ID","week","year"))
 
 # Adding the number of classrooms each teacher has
 T <- data.frame(table(classroom_teacher_lookup$Teacher.User.ID))
 T <- rename(.data = T, teacher.number.classes = Freq)
-teacher_student_usage_subset <- merge(teacher_student_usage_subset, T, 
+teacher_student_usage_subset <- merge(teacher_student_usage_subset, T,
                                       by.x = c("Teacher.User.ID"), by.y = c("Var1"))
 
-teacher_student_usage_subset <- merge(teacher_student_usage_subset, classroom_info, 
+teacher_student_usage_subset <- merge(teacher_student_usage_subset, classroom_info,
                                       by = c("Classroom.ID"))
 teacher_student_usage_subset$Grade.Level <- factor(teacher_student_usage_subset$Grade.Level, ordered = TRUE)
 
@@ -62,12 +61,12 @@ la_usage_types$curriculum <- 0
 la_usage_types$curriculum[la_usage_types$`Schools and Districts Usage Type` == "20-21 Curriculum"] <- 1
 la_usage_types$curriculum[la_usage_types$`Schools and Districts Usage Type` == "Core Complement"] <- 1
 
-teacher_student_usage_subset <- merge(teacher_student_usage_subset, la_usage_types, 
+teacher_student_usage_subset <- merge(teacher_student_usage_subset, la_usage_types,
                                       by.x = c("MDR.School.ID"), by.y = c("Schools and Districts MDR School ID"),
                                       all.x = TRUE)
 teacher_student_usage_subset <- teacher_student_usage_subset[-44]
 
-teacher_student_usage_subset <- merge(teacher_student_usage_subset, school_info[c(1,7)], 
+teacher_student_usage_subset <- merge(teacher_student_usage_subset, school_info[c(1,7)],
                                       by = c("MDR.School.ID"),
                                       all.x = TRUE)
 teacher_student_usage_subset$Demographics...Zipcode.Median.Income <- factor(teacher_student_usage_subset$Demographics...Zipcode.Median.Income, ordered = TRUE)
@@ -97,7 +96,7 @@ teacher_student_usage_subset <- subset(duplicates, duplicate=="FALSE") # delete 
 # Replace NAs with 0
 teacher_student_usage_subset[is.na(teacher_student_usage_subset$Badges.per.Active.User),]$Badges.per.Active.User <- 0
 # Remove small classrooms
-teacher_student_usage_subset <- subset(teacher_student_usage_subset, Students...Total>5) 
+teacher_student_usage_subset <- subset(teacher_student_usage_subset, Students...Total>5)
 
 
 
@@ -105,7 +104,7 @@ teacher_student_usage_subset <- subset(teacher_student_usage_subset, Students...
 #---------------------------------------------------------
 #---------------------Burstiness and memory---------------
 #---------------------------------------------------------
-# 
+#
 teacher_bursts <- teacher_usage[teacher_usage$Adult.User.ID %in% teacher_student_usage_subset$Teacher.User.ID,]
 
 #aggregate by day
@@ -189,12 +188,12 @@ ica <- fastICA(X = teacher_student_usage_subset[c(14:39)], n.comp=3, row.norm = 
 pca <- prcomp(teacher_student_usage_subset[c(14:39)], tol = 0.1)
 prop_variance = summary(pca)$importance[2,][1:10]
 
-png("/Users/sean/Desktop/zearn_nudge/robustness_check/Elbow_plot.png",res = 120)
+# png("/Users/sean/Desktop/zearn_nudge/robustness_check/Elbow_plot.png",res = 120)
 x <- 1:10
-plot(x, prop_variance, type = "b", pch = 19, 
+plot(x, prop_variance, type = "b", pch = 19,
      col = "blue", xlab = "N-th cluster", ylab = "Proportion of Variance",
      main="Elbow method for\n determining optimal k")
-dev.off()
+# dev.off()
 
 
 ica.comps <- data.frame(ica$S)
@@ -241,7 +240,7 @@ temp_l = vector(mode="numeric")
 for (i in unique(teacher_student_usage_subset$Teacher.User.ID)){
   temp_l = append(temp_l,nrow(temp[temp$Teacher.User.ID == i, ]))
 }
-quantile(temp_l, probs = c(0,0.25,0.5,0.75,1)) 
+quantile(temp_l, probs = c(0,0.25,0.5,0.75,1))
 # stdev
 sd(temp_l)
 
@@ -264,7 +263,7 @@ sum(temp$x)
 # mean
 sum(temp$x)/length(temp$Group.1)
 # quatile
-quantile(temp$x, probs = c(0,0.25,0.5,0.75,1)) 
+quantile(temp$x, probs = c(0,0.25,0.5,0.75,1))
 # stdev
 sd(temp$x)
 
@@ -309,18 +308,18 @@ for (i in temp_list) {
   # stdev
   print(sd(temp_spec$x))
 }
-  
-  
+
+
 
 # correlation matrix for teacher activity
 M <- cor(teacher_student_usage_subset[c(14:39)])
 library('corrplot') #package corrplot
-png("/Users/sean/Desktop/zearn_nudge/robustness_check/teacher_activity_corr_plot.png",res = 70)
+# png("/Users/sean/Desktop/zearn_nudge/robustness_check/teacher_activity_corr_plot.png",res = 70)
 corrplot(M, method = "color", type = 'lower', diag = FALSE) #plot matrix
-dev.off()
+# dev.off()
 cor(teacher_student_usage_subset[c(37:38)])
 cor(teacher_student_usage_subset[c(24:28)])
-  
+
 # PCA regression without bursty and memory
 fmla <- as.formula(paste("log(Badges.per.Active.User+1) ~ ", paste0(sprintf("`%s`", colnames(teacher_student_usage_subset[c(41:45,50:52)])), collapse = " + ")))
 # 41: teacher.number.classes
@@ -341,9 +340,9 @@ sd(teacher_student_usage_subset$ica1)
 sd(teacher_student_usage_subset$ica2)
 sd(teacher_student_usage_subset$ica3)
 sd(log(teacher_student_usage_subset$Badges.per.Active.User+1))
-1.000004/0.589562 = 1.696181
-
-0.310, 0.118, 0.067
-1.696181*0.183*.897 + 1.696181*0.070*0.042 +1.696181*0.040*(-0.027) = 0.2815847
+# 1.000004/0.589562 = 1.696181
+#
+# 0.310, 0.118, 0.067
+# 1.696181*0.183*.897 + 1.696181*0.070*0.042 +1.696181*0.040*(-0.027) = 0.2815847
 
 
