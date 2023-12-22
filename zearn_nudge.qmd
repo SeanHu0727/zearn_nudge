@@ -45,23 +45,38 @@ teacher_usage <- teacher_usage %>%
     whour = (wday - 1)*24 + hour,
     # Transforming Event.Type for "Resource Downloaded"
     Event.Type = ifelse(Event.Type == "Resource Downloaded",
-                        paste("RD.", Curriculum.Resource.Category),
+                        paste0("RD.", Curriculum.Resource.Category),
                         Event.Type)
     )
 
 # Summarize teacher behavior
 teacher_usage_total <- teacher_usage %>%
   count(Adult.User.ID, Event.Type, week, year) %>%
-  pivot_wider(names_from = Event.Type, values_from = n, values_fill = list(n = 0))
+  pivot_wider(names_from = Event.Type, values_from = n,
+              values_fill = list(n = 0)) %>%
+  full_join(teacher_usage %>%
+              group_by(Adult.User.ID, week, year) %>%
+              summarize(Minutes.on.Zearn...Total = sum(Minutes.on.Zearn...Total)),
+            by = c("Adult.User.ID", "week", "year"))
+
+# Remove teachers inactive for more than 2 months
+active_teachers <- teacher_usage_total %>%
+  count(Adult.User.ID) %>%
+  filter(n > 8) %>%
+  pull(Adult.User.ID)
 
 # Merge teacher and student data
 # Merging with the classroom info for further merge with teacher info
 teacher_student_usage_subset <- classroom_student_usage %>%
-  inner_join(classroom_teacher_lookup, by = "Classroom.ID") %>%
+  inner_join(classroom_teacher_lookup %>%
+               # Filtering active teachers
+               filter(Teacher.User.ID %in% active_teachers),
+             by = "Classroom.ID") %>%
   mutate(week = lubridate::week(Usage.Week),
          year = lubridate::year(Usage.Week)) %>%
-  inner_join(teacher_usage_total, by = c("Teacher.User.ID" = "Adult.User.ID",
-                                        "week", "year"))
+  inner_join(teacher_usage_total,
+             by = c("Teacher.User.ID" = "Adult.User.ID",
+                    "week", "year"))
 
 # Adding the number of classrooms each teacher has
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
@@ -115,6 +130,8 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% active_classrooms)
 
 average_student <- teacher_student_usage_subset %>%
+  # More than 5 students
+  filter(Students...Total > 5) %>%
   group_by(Classroom.ID) %>%
   summarise(Active.Users...Total = mean(Active.Users...Total)) %>%
   # More than 5 active students on average
@@ -124,14 +141,20 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% average_student$Classroom.ID)
 
 # Remove duplicate classroom-week pairs (classrooms with more than one teacher)
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
+duplicated_classrooms <- teacher_student_usage_subset %>%
   mutate(unique_id = paste(Classroom.ID, Usage.Week)) %>%
-  filter(!duplicated(unique_id))
+  group_by(Classroom.ID) %>%
+  # Identify Classroom.IDs with at least one duplicated Classroom-Week pair
+  filter(any(duplicated(unique_id))) %>%
+  distinct(Classroom.ID) %>%
+  ungroup()
 
-# Replace NAs with 0 and remove small classrooms
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User), 0, Badges.per.Active.User)) %>%
-  filter(Students...Total > 5)
+  # Filter out all rows with those Classroom.IDs
+  filter(!Classroom.ID %in% duplicated_classrooms$Classroom.ID) %>%
+  # Replace NAs with 0 and remove small classrooms
+  mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User),
+                                         0, Badges.per.Active.User))
 ```
   
 #### Summary Statistics
@@ -237,22 +260,24 @@ gt_table
 
 ```{r}
 
-# Perform ICA and PCA
-ica_result <- fastICA(X = teacher_student_usage_subset[14:39],
-                      n.comp = 3, row.norm = TRUE)
-pca_result <- prcomp(teacher_student_usage_subset[14:39], tol = 0.1)
+# Perform PCA to choose number of components
+# Removing columns with zero variance
+ICA_cols <- sapply(teacher_student_usage_subset[13:39], function(x) sd(x) != 0)
+pca_result <- prcomp(teacher_student_usage_subset[13:39][, ICA_cols],
+                     scale. = TRUE)
 prop_variance <- summary(pca_result)$importance[2, 1:10]
-
-# Create Elbow Plot with ggplot2
-elbow_plot <- ggplot(data.frame(Cluster = 1:10, Variance = prop_variance), aes(x = Cluster, y = Variance)) +
+# Create Elbow Plot
+elbow_plot <- ggplot(data.frame(Cluster = 1:10, Variance = prop_variance),
+                     aes(x = Cluster, y = Variance)) +
+  geom_line(color = "gray") +
   geom_point() +
-  geom_line(color = "blue") +
-  labs(x = "N-th Cluster", y = "Proportion of Variance", title = "Elbow Method for Determining Optimal k") +
+  labs(x = "N-th Cluster", y = "Proportion of Variance",
+       title = "Elbow Method for Determining Optimal k") +
   theme_minimal()
 
-# Save plot to a file (Uncomment to save the plot)
-# ggsave("/Users/sean/Desktop/zearn_nudge/robustness_check/Elbow_plot.png", elbow_plot, dpi = 120)
-
+# Perform ICA
+ica_result <- fastICA(X = teacher_student_usage_subset[13:39][, ICA_cols],
+            n.comp = 3, row.norm = TRUE)
 # Add ICA components to the dataset
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   mutate(
@@ -264,25 +289,24 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
 # Return ICA mixing matrix
 ica_result$A
 
-
-ica <- fastICA(X = teacher_student_usage_subset[c(14:39)], n.comp=3, row.norm = TRUE)
-#ica8 <- fastICA(X = teacher_student_usage_subset[c(13:39)], n.comp=8, row.norm = TRUE)
-pca <- prcomp(teacher_student_usage_subset[c(14:39)], tol = 0.1)
-prop_variance = summary(pca)$importance[2,][1:10]
-
-# png("/Users/sean/Desktop/zearn_nudge/robustness_check/Elbow_plot.png",res = 120)
-x <- 1:10
-plot(x, prop_variance, type = "b", pch = 19,
-     col = "blue", xlab = "N-th cluster", ylab = "Proportion of Variance",
-     main="Elbow method for\n determining optimal k")
-# dev.off()
+sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
+       FUN = var) /
+  sum(sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
+             FUN = var))
 
 
-ica.comps <- data.frame(ica$S)
-teacher_student_usage_subset$ica1 <- ica.comps$X1
-teacher_student_usage_subset$ica2 <- ica.comps$X2
-teacher_student_usage_subset$ica3 <- ica.comps$X3
-ica$A
+## Robustness
+# Exclude User.Session
+ica_result2 <- fastICA(X = teacher_student_usage_subset[14:39][, ICA_cols[-1]],
+            n.comp = 3, row.norm = TRUE)
+# Return ICA mixing matrix
+ica_result2$A
+
+sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
+       FUN = var) /
+  sum(sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
+             FUN = var))
+
 ```
 
 #### **Statistical Considerations**:
