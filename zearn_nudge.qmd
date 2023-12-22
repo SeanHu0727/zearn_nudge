@@ -8,6 +8,8 @@ library(tidyverse)
 library(zoo)
 library(gt)
 library(fastICA)
+library(plm)
+library(performance)
 set.seed(794563797)
 # Timestamp: 2023-12-21 21:42:25 UTC
 # © 1998-2023 RANDOM.ORG
@@ -286,9 +288,7 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
     ica3 = ica_result$S[, 3]
   )
 
-# Return ICA mixing matrix
-ica_result$A
-
+# Variance Explained
 sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
        FUN = var) /
   sum(sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
@@ -299,13 +299,38 @@ sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
 # Exclude User.Session
 ica_result2 <- fastICA(X = teacher_student_usage_subset[14:39][, ICA_cols[-1]],
             n.comp = 3, row.norm = TRUE)
-# Return ICA mixing matrix
-ica_result2$A
-
+# Variance explained
 sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
        FUN = var) /
   sum(sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
              FUN = var))
+
+
+
+
+
+# Creating a data frame for the ICA loadings
+ica_loadings_df <- as.data.frame(t(ica_result$A))
+colnames(ica_loadings_df) <- paste("Component", 1:ncol(ica_loadings_df))
+ica_loadings_df$Feature <- colnames(teacher_student_usage_subset[13:39])[ICA_cols]
+
+# Creating the table with gt
+ica_loadings_table <- ica_loadings_df %>%
+  relocate(Feature) %>%
+  gt() %>%
+  tab_header(
+    title = "ICA Loadings",
+    subtitle = "Loadings of each feature on the independent components"
+  ) %>%
+  cols_label(
+    Feature = "Variable",
+    `Component 1` = "Component 1",
+    `Component 2` = "Component 2",
+    `Component 3` = "Component 3"
+  )
+
+# Display the table
+ica_loadings_table
 
 ```
 
@@ -314,6 +339,31 @@ sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
   -   Justification of model choices.
   -   Details of any sensitivity or robustness checks.
   -   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
+
+```{r}
+
+# Define the columns to be used in the formula
+columns_used <- colnames(teacher_student_usage_subset[c(41:42, 44:46, 49:51)])
+
+# Create the formula
+fmla_str <- sprintf("log(Badges.per.Active.User + 1) ~ %s",
+                    paste(sprintf("`%s`", columns_used), collapse = " + "))
+fmla <- as.formula(fmla_str)
+
+# Define the panel model index
+panel_index <- c("Classroom.ID", "Usage.Week", "Teacher.User.ID")
+
+# Create and summarize the 'within' model directly
+within_model <- plm(fmla, data = teacher_student_usage_subset,
+                    index = panel_index, effect = "twoway", model = "within")
+summary(within_model)
+
+# Hausman Test supports Fixed Effects
+# re <- plm(fmla, data = teacher_student_usage_subset,
+#           index = panel_index, effect = "twoway", model = "random")
+# phtest(within_model, re)
+
+```
 
 ### Study 1b: Data-driven Nudge Engineering with Habit-based Regression
 
