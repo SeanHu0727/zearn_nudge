@@ -6,10 +6,9 @@ format: pdf
 ```{r import}
 library(tidyverse)
 library(zoo)
+library(ggrepel)
 library(gt)
-library(fastICA)
-library(plm)
-library(performance)
+library(furrr)
 set.seed(794563797)
 # Timestamp: 2023-12-21 21:42:25 UTC
 # © 1998-2023 RANDOM.ORG
@@ -22,19 +21,7 @@ school_info <- read.csv("Data/raw/School Info 2020-10-09T1619.csv")
 la_usage_types <- read_csv("Data/raw/la_usage_types.csv")
 ```
 
-## Methods
-
-### Study 1
-
-#### Data Collection
-
-  -   Source and timeframe of data.
-  -   Specific teacher and student metrics collected.
-  -   Data cleaning and preprocessing steps.
-  -   Depositing of Raw Data: Ensure all raw data is available in a publicly accessible database.
-  -   Criteria for selecting and excluding data points or subjects.
-
-This dataset forms the basis for assessing the impact of our upcoming experimental intervention aimed at enhancing teaching methodologies and student learning outcomes.
+## Data
 
 ```{r preprocessing}
 teacher_usage <- teacher_usage %>%
@@ -61,11 +48,30 @@ teacher_usage_total <- teacher_usage %>%
               summarize(Minutes.on.Zearn...Total = sum(Minutes.on.Zearn...Total)),
             by = c("Adult.User.ID", "week", "year"))
 
-# Remove teachers inactive for more than 2 months
+# Teacher exclusion
 active_teachers <- teacher_usage_total %>%
   count(Adult.User.ID) %>%
-  filter(n > 8) %>%
+  # Remove teachers inactive for more than 4 weeks
+  filter(n >= 4) %>%
   pull(Adult.User.ID)
+
+# Classroom exclusion
+classroom_teacher_lookup <- classroom_teacher_lookup %>%
+  group_by(Teacher.User.ID) %>%
+  mutate(teacher_number_classes = n()) %>%
+  ungroup() %>%
+  group_by(Classroom.ID) %>%
+  # Delete classrooms with multiple teachers
+  filter(n_distinct(Teacher.User.ID) == 1) %>%
+  ungroup() %>%
+  inner_join(classroom_info %>%
+               group_by(Classroom.ID) %>%
+               # Delete classrooms with multiple schools
+               filter(n_distinct(MDR.School.ID) == 1) %>%
+               ungroup(), by = "Classroom.ID") %>%
+  mutate(
+    Grade.Level = factor(Grade.Level, ordered = TRUE)
+    )
 
 # Merge teacher and student data
 # Merging with the classroom info for further merge with teacher info
@@ -78,21 +84,10 @@ teacher_student_usage_subset <- classroom_student_usage %>%
          year = lubridate::year(Usage.Week)) %>%
   inner_join(teacher_usage_total,
              by = c("Teacher.User.ID" = "Adult.User.ID",
-                    "week", "year"))
-
-# Adding the number of classrooms each teacher has
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  inner_join(classroom_teacher_lookup %>%
-              count(Teacher.User.ID) %>%
-              rename(teacher.number.classes = n),
-            by = "Teacher.User.ID")
-
-# Adding the classrooms types
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  inner_join(classroom_info, by = "Classroom.ID") %>%
-  mutate(
-    Grade.Level = factor(Grade.Level, ordered = TRUE)
-    )
+                    "week", "year")) %>%
+  # Replace NAs with 0
+  mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User),
+                                         0, Badges.per.Active.User))
 
 # Process la_usage_types
 la_usage_types <- la_usage_types %>%
@@ -109,56 +104,54 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
             by = c("MDR.School.ID" = "Schools and Districts MDR School ID")) %>%
   select(!`Schools and Districts Usage Type`) %>%
   left_join(school_info %>% 
-              select(MDR.School.ID, Demographics...Zipcode.Median.Income),
+              select(MDR.School.ID, District.Rollup.ID,
+                     Demographics...Zipcode.Median.Income,
+                     Demographics...Poverty.Level,
+                     Is.Charter..Yes...No.,
+                     MDR.School.has.School.Account..Yes...No.,
+                     School.Address...Zipcode),
             by = "MDR.School.ID") %>%
-  mutate(Demographics...Zipcode.Median.Income =
-           factor(Demographics...Zipcode.Median.Income,
-                  ordered = TRUE))
-
+  rename(medianIncome = Demographics...Zipcode.Median.Income,
+         povertyLevel = Demographics...Poverty.Level,
+         charterSchool = Is.Charter..Yes...No.,
+         schoolAccount = MDR.School.has.School.Account..Yes...No.,
+         zipcode = School.Address...Zipcode) %>%
+  mutate(medianIncome = factor(medianIncome, ordered = TRUE),
+         povertyLevel = factor(povertyLevel, ordered = TRUE),
+         charterSchool = case_when(charterSchool == "No" ~ 0,
+                                   charterSchool == "Yes" ~ 1,
+                                   .default = NA),
+         schoolAccount = case_when(schoolAccount == "No" ~ 0,
+                                   schoolAccount == "Yes" ~ 1,
+                                   .default = NA))
+  
 # Processing students' data
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   mutate(month = month(Usage.Week)) %>%
   # Remove June/July/August
   filter(!month %in% c(6, 7, 8))
 
-# Filtering active classrooms
+# Filtering active teacher-classrooms
 active_classrooms <- teacher_student_usage_subset %>%
   count(Classroom.ID) %>%
-  # Remove classes inactive for more than 7 months
-  filter(n > 20) %>%
+  # Remove teachers or classes active for at least 3 months
+  filter(n >= 12) %>%
   pull(Classroom.ID)
-
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% active_classrooms)
 
 average_student <- teacher_student_usage_subset %>%
-  # More than 5 students
-  filter(Students...Total > 5) %>%
+  # At least 5 students
+  filter(Students...Total >= 5) %>%
   group_by(Classroom.ID) %>%
   summarise(Active.Users...Total = mean(Active.Users...Total)) %>%
-  # More than 5 active students on average
-  filter(Active.Users...Total > 5)
-
+  # At least one active students per week on average
+  filter(Active.Users...Total > 1)
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% average_student$Classroom.ID)
 
-# Remove duplicate classroom-week pairs (classrooms with more than one teacher)
-duplicated_classrooms <- teacher_student_usage_subset %>%
-  mutate(unique_id = paste(Classroom.ID, Usage.Week)) %>%
-  group_by(Classroom.ID) %>%
-  # Identify Classroom.IDs with at least one duplicated Classroom-Week pair
-  filter(any(duplicated(unique_id))) %>%
-  distinct(Classroom.ID) %>%
-  ungroup()
-
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  # Filter out all rows with those Classroom.IDs
-  filter(!Classroom.ID %in% duplicated_classrooms$Classroom.ID) %>%
-  # Replace NAs with 0 and remove small classrooms
-  mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User),
-                                         0, Badges.per.Active.User))
 ```
-  
+
 #### Summary Statistics
 
 ```{r}
@@ -253,61 +246,215 @@ gt_table
 
 ```
 
-### Study 1a: Data-driven Nudge Engineering with PCA
+-   Specific teacher and student metrics collected.
 
-#### PCA Execution:
-  -   Selection criteria for variables included in PCA.
-  -   Step-by-step PCA process.
-  -   Software and version used for PCA.
+<!-- SEAN: Help troubleshoot map -->
 
 ```{r}
+#| eval: false
+#| cache: true
+#| label: fig-teachers-map
+#| fig-cap: "Geographical distribution of teachers across various parishes in Louisiana, and the top 5 cities with the highest number of teachers."
 
-# Perform PCA to choose number of components
+library(sf)
+library(tidygeocoder)
+library(tigris)
+
+# Batch geocoding
+# Sys.setenv(GEOCODIO_API_KEY = "")
+unique_zipcodes <- unique(teacher_student_usage_subset$zipcode) %>%
+  as.list()
+plan(strategy = "multisession", workers = availableCores())
+address_geodata <- furrr::future_map_dfr(.x = unique_zipcodes, 
+                               ~ geo(postalcode = .x,
+                                     country = "United States",
+                                     method = 'geocodio',
+                                     full_results = TRUE,
+                                     progress_bar = FALSE)) %>%
+  select(postalcode,
+         address_components.city,
+         address_components.county,
+         lat, long) %>%
+  rename(
+    city = address_components.city,
+    county = address_components.county
+  ) %>%
+  mutate(
+    postalcode = as.integer(postalcode)
+  )
+
+# Merge the geocoding results back into the original data.table
+n_teachers <- teacher_student_usage_subset %>%
+  group_by(Classroom.ID, Teacher.User.ID, MDR.School.ID,
+           District.Rollup.ID, zipcode) %>%
+  summarize(Students...Total = mean(Students...Total), 
+            .groups = "keep") %>%
+  full_join(address_geodata, by = c("zipcode" = "postalcode"))
+
+# Get the top 5 cities by number of teachers
+# Aggregate the data to get the number of teachers in each city
+top_cities <- n_teachers %>%
+  group_by(city, county) %>%
+  summarize(
+    num_teachers = n_distinct(Teacher.User.ID),
+    lat = mean(lat, na.rm = TRUE),
+    long = mean(long, na.rm = TRUE),
+    .groups = 'drop' # Optionally, drop grouping structure from the result
+  ) %>%
+  arrange(desc(num_teachers)) %>%
+  slice_head(n = 5)
+
+# Get the Louisiana county map data
+df_map <- tigris::counties(class = "sf",
+                           state = "LA",
+                           progress_bar = FALSE) %>%
+  # sf::st_set_crs(4326) %>%
+  left_join(
+    n_teachers %>%
+      group_by(county) %>%
+      summarize(num_teachers = n_distinct(Teacher.User.ID)),
+    by = c("NAMELSAD" = "county")
+    ) %>%
+  mutate(num_teachers = ifelse(is.na(num_teachers),0,num_teachers)) %>%
+  sf::st_as_sf()
+
+ggplot() +
+  geom_sf(data = df_map, aes(fill = num_teachers)) +
+  scale_fill_continuous(name = "Number of Teachers",
+                        low = "white", high = "red", na.value = "gray90") +
+  labs(
+    title = "Number of Teachers by Parish in Louisiana"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank()
+  ) +
+  geom_point(data = top_cities, aes(x = long, y = lat)) +
+  geom_text_repel(data = top_cities, aes(x = long, y = lat, label = city),
+                  size = 3, color = "black")
+
+```
+
+## Materials and Methods
+
+### Study 1
+
+#### Data Collection
+
+The Zearn math educational learning platform provided us with administrative data spanning the 2019-2020 academic year (September 2019 to May 2020). This dataset included detailed teacher actions and classroom-week-level student achievement metrics. Teacher actions on the platform were timestamped to the second. For privacy considerations, Zearn aggregated student data at the classroom-week level, including student achievement measures and indications of student struggles. The dataset covered various schools across Louisiana (@fig-teachers-map).
+
+To promote transparency and replicability of our study, we have deposited the data and code used in our analyses in a publicly accessible database. Researchers and interested parties can access the complete dataset and all related processing scripts at the GitHub repository: <https://github.com/SeanHu0727/zearn_nudge.git>
+
+#### Inclusion Criteria
+
+We aggregated teacher behavior data to the weekly level and merged it with the student data at the classroom-week level. We also excluded inactive teachers (those with no recorded activity for over two months) from the dataset.
+
+We defined the inclusion criteria for classrooms strictly as such:
+
+1.  Classrooms linked to a single teacher
+
+2.  Classrooms with no more than seven months of inactivity during the academic year
+
+3.  Classrooms with an average of no less than five actively engaged students
+
+### Study 1a
+
+#### Independent Component Analysis (ICA)
+
+-   Selection criteria for variables included in ICA.
+-   Step-by-step ICA process.
+-   Software and version used for ICA.
+
+```{r ICA}
+
+library(ica)
+
+# Perform ICA to choose number of components
 # Removing columns with zero variance
-ICA_cols <- sapply(teacher_student_usage_subset[13:39], function(x) sd(x) != 0)
-pca_result <- prcomp(teacher_student_usage_subset[13:39][, ICA_cols],
-                     scale. = TRUE)
-prop_variance <- summary(pca_result)$importance[2, 1:10]
+ICA_cols <- teacher_student_usage_subset %>%
+  select(`User Session`:RD.foundational_lesson_guidance) %>%
+  select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
+  mutate_all(scale)
+
+imod.fast <- ica(ICA_cols, nc = 10)
+
 # Create Elbow Plot
-elbow_plot <- ggplot(data.frame(Cluster = 1:10, Variance = prop_variance),
-                     aes(x = Cluster, y = Variance)) +
+## SEAN: Fix plot to show integers in x-axis and % in y-axis
+elbow_plot <- ggplot(data.frame(Component = 1:10, Variance = imod.fast$vafs),
+                     aes(x = Component, y = Variance)) +
   geom_line(color = "gray") +
   geom_point() +
-  labs(x = "N-th Cluster", y = "Proportion of Variance",
-       title = "Elbow Method for Determining Optimal k") +
+  labs(x = "Component", y = "Proportion of Variance",
+       title = "Scree Plot for Determining Optimal k") +
   theme_minimal()
 
-# Perform ICA
-ica_result <- fastICA(X = teacher_student_usage_subset[13:39][, ICA_cols],
-            n.comp = 3, row.norm = TRUE)
+
+# ICA via different algorithms
+
+## SEAN: Run each method 100 times and compare:
+## 1) percentage $converged
+## 2) $iter
+## 3) $vafs
+## 4) Coefficient of Tower Struggles
+## We will choose the best method accordingly (most stable and interpretable)
+
+imod.fast <- ica(ICA_cols, nc = 3)
+# imod.imax <- ica(ICA_cols, nc = 3, method = "imax")
+# imod.jade <- ica(ICA_cols, nc = 3, method = "jade")
+
+
+# Iterate through each principal component
+for (i in 1:ncol(imod.fast$M)) {
+    # Find the index of the variable with the largest absolute coefficient
+    largest_coef_index <- which.max(abs(imod.fast$M[, i]))
+
+    # Check if the largest coefficient is negative
+    if (imod.fast$M[largest_coef_index, i] < 0) {
+        # Multiply all coefficients in this principal component by -1
+        imod.fast$M[, i] <- -1 * imod.fast$M[, i]
+        imod.fast$S[, i] <- -1 * imod.fast$S[, i]
+    }
+}
+
 # Add ICA components to the dataset
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   mutate(
-    ica1 = ica_result$S[, 1],
-    ica2 = ica_result$S[, 2],
-    ica3 = ica_result$S[, 3]
+    ic1 = imod.fast$S[, 1],
+    ic2 = imod.fast$S[, 2],
+    ic3 = imod.fast$S[, 3]
   )
 
-# Variance Explained
-sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
-       FUN = var) /
-  sum(sapply(as.data.frame(as.matrix(ica_result$X)%*%t(as.matrix(ica_result$A))),
-             FUN = var))
+```
+
+```{r PCA}
+#| eval: false
+
+pca_result <- prcomp(PCA_cols, scale. = TRUE)
+prop_variance <- summary(pca_result)$importance[2, 1:10]
+
+# Add to dataset
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  mutate(
+    pc1 = pca_result$x[, 1],
+    pc2 = pca_result$x[, 2],
+    pc3 = pca_result$x[, 3]
+  )
 
 
 ## Robustness
 # Exclude User.Session
-ica_result2 <- fastICA(X = teacher_student_usage_subset[14:39][, ICA_cols[-1]],
-            n.comp = 3, row.norm = TRUE)
+ICA_cols <- teacher_student_usage_subset %>%
+  select(RD.elementary_schedule:RD.foundational_lesson_guidance) %>%
+  select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
+  mutate_all(scale)
+
+imod.fast2 <- ica(ICA_cols, nc = 3)
+
 # Variance explained
-sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
-       FUN = var) /
-  sum(sapply(as.data.frame(as.matrix(ica_result2$X)%*%t(as.matrix(ica_result2$A))),
-             FUN = var))
-
-
-
-
+imod.fast2
 
 # Creating a data frame for the ICA loadings
 ica_loadings_df <- as.data.frame(t(ica_result$A))
@@ -335,103 +482,165 @@ ica_loadings_table
 ```
 
 #### **Statistical Considerations**:
-  -   Explanation of statistical models used.
-  -   Justification of model choices.
-  -   Details of any sensitivity or robustness checks.
-  -   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
+
+-   Explanation of statistical models used.
+-   Details of any sensitivity or robustness checks.
+-   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
 
 ```{r}
+library(plm)
 
 # Define the columns to be used in the formula
-columns_used <- colnames(teacher_student_usage_subset[c(41:42, 44:46, 49:51)])
-
+columns_used <- colnames(teacher_student_usage_subset %>%
+                           select(teacher_number_classes, Grade.Level,
+                                  Students...Total, teacher_number_classes, 
+                                  # medianIncome:schoolAccount,
+                                  ic1:ic3))
 # Create the formula
-fmla_str <- sprintf("log(Badges.per.Active.User + 1) ~ %s",
+fmla_str <- sprintf("logBadges ~ %s",
                     paste(sprintf("`%s`", columns_used), collapse = " + "))
 fmla <- as.formula(fmla_str)
 
 # Define the panel model index
-panel_index <- c("Classroom.ID", "Usage.Week", "Teacher.User.ID")
+pUsage <- pdata.frame(teacher_student_usage_subset %>%
+                        group_by(Teacher.User.ID) %>%
+                        mutate(week = week - min(week) + 1) %>%
+                        ungroup() %>%
+                        mutate(logBadges = log(Badges.per.Active.User + 1)),
+                      index = c("Classroom.ID", "week", "Teacher.User.ID"))
 
 # Create and summarize the 'within' model directly
-within_model <- plm(fmla, data = teacher_student_usage_subset,
-                    index = panel_index, effect = "twoway", model = "within")
+## SEAN: please compare with objfun = "lad" (maybe more robust to outliers?)
+within_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
+                     lower = 0, sample = "cens")
+# within_model <- plm(fmla, data = pUsage, model = "within")
 summary(within_model)
 
 # Hausman Test supports Fixed Effects
-# re <- plm(fmla, data = teacher_student_usage_subset,
-#           index = panel_index, effect = "twoway", model = "random")
-# phtest(within_model, re)
+re <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
+           lower = 0, sample = "cens")
+phtest(within_model, re)
 
 ```
 
 ### Study 1b: Data-driven Nudge Engineering with Habit-based Regression
 
 #### **Data Utilization**:
-    -   Criteria for data selection.
-    -   Description of data preprocessing.
-    -   Pre-registration of Study: If applicable, mention if this study was pre-registered.
+
+```         
+-   Criteria for data selection.
+-   Description of data preprocessing.
+-   Pre-registration of Study: If applicable, mention if this study was pre-registered.
+```
+
 #### **Regression Analysis Methodology**:
-    -   Detailed steps in the regression analysis.
-    -   Explanation of fixed effects model.
-    -   Software and tools used in analysis.
-    -   Publishing Negative Data: Include any negative data that did not support hypotheses.
+
+```         
+-   Detailed steps in the regression analysis.
+-   Explanation of fixed effects model.
+-   Software and tools used in analysis.
+-   Publishing Negative Data: Include any negative data that did not support hypotheses.
+```
+
 #### **Statistical Tools and Software**:
-    -   List of all statistical software and tools.
-    -   Versions and settings used.
-    -   Thorough Description of Methods: Clearly report experimental parameters.
+
+```         
+-   List of all statistical software and tools.
+-   Versions and settings used.
+-   Thorough Description of Methods: Clearly report experimental parameters.
+```
 
 ### Study 2a: Nudge Engineering / Increasing Engagement Through Empathy
 
 #### **Pre-registration Details**:
-    -   Date created: September 14, 2021.
-    -   Confirmation that no data were collected prior to the study.
-    -   Hypotheses: H1 and H2 with detailed descriptions.
-    -   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
-    -   Conditions: Description of "Empathy" treatment and "Control Condition".
-    -   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
-    -   Outliers and Exclusions: Specific criteria for exclusion of observations.
-    -   Sample Size: Number of participants and criteria for eligibility.
-    -   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+
+```         
+-   Date created: September 14, 2021.
+-   Confirmation that no data were collected prior to the study.
+-   Hypotheses: H1 and H2 with detailed descriptions.
+-   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
+-   Conditions: Description of "Empathy" treatment and "Control Condition".
+-   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
+-   Outliers and Exclusions: Specific criteria for exclusion of observations.
+-   Sample Size: Number of participants and criteria for eligibility.
+-   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+```
+
 #### **Intervention Design**:
-    -   Steps in developing empathy-based interventions.
-    -   Criteria for intervention selection.
+
+```         
+-   Steps in developing empathy-based interventions.
+-   Criteria for intervention selection.
+```
+
 #### **Implementation Method**:
-    -   Detailed procedure for implementing interventions.
-    -   Timeline and phases of implementation.
+
+```         
+-   Detailed procedure for implementing interventions.
+-   Timeline and phases of implementation.
+```
+
 #### **Evaluation Technique**:
-    -   Methods of measuring intervention impact.
-    -   Statistical analysis of results.
-    -   Detailed Reporting of Methodologies: Include comprehensive description of all methodologies used.
+
+```         
+-   Methods of measuring intervention impact.
+-   Statistical analysis of results.
+-   Detailed Reporting of Methodologies: Include comprehensive description of all methodologies used.
+```
+
 #### **Outcome Measure**:
-    -   Specific measures used to evaluate the impact of interventions.
-#### **IRB Information**:
-    -   Details of Institutional Review Board (IRB) approvals and ethical considerations, if applicable.
+
+```         
+-   Specific measures used to evaluate the impact of interventions.
+```
 
 ### Study 2b: Nudge Engineering / Increasing Engagement Through Habitization
 
 #### **Pre-registration Details**:
-    -   Date created: September 14, 2021.
-    -   Confirmation that no data were collected prior to the study.
-    -   Hypotheses: H1, H2, and H3 with detailed descriptions.
-    -   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
-    -   Conditions: Description of "Friday log-in", "Wednesday log-in", and "Control Condition".
-    -   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
-    -   Outliers and Exclusions: Specific criteria for exclusion of observations.
-    -   Sample Size: Number of participants and criteria for eligibility.
-    -   Additional Analyses: Detailed list of supplementary analyses to be conducted.
-#### **Nudge Development Process**:
-    -   Detailed steps in nudge creation.
-    -   Basis for selecting specific nudges.
-#### **Application Protocol**:
-    -   Procedure for nudge application.
-    -   Monitoring and adaptation strategies.
-#### **Impact Assessment Method**:
-    -   Techniques for evaluating nudge effectiveness.
-    -   Statistical methods for analyzing outcomes.
-    -   Comprehensive Methodological Reporting: Ensure thorough reporting of all methods and experimental parameters.
-#### **Outcome Measure**:
-    -   Specific measures used to evaluate the impact of interventions.
-#### **IRB Information**:
-    -   Details of Institutional Review Board (IRB) approvals and ethical considerations, if applicable.
 
+```         
+-   Date created: September 14, 2021.
+-   Confirmation that no data were collected prior to the study.
+-   Hypotheses: H1, H2, and H3 with detailed descriptions.
+-   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
+-   Conditions: Description of "Friday log-in", "Wednesday log-in", and "Control Condition".
+-   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
+-   Outliers and Exclusions: Specific criteria for exclusion of observations.
+-   Sample Size: Number of participants and criteria for eligibility.
+-   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+```
+
+#### Ethical Considerations and IRB Approval
+
+This study was conducted in accordance with ethical standards and received approval from the Institutional Review Board (IRB) at the University of Pennsylvania. Given the nature of the data, which included de-identified and aggregated information, the IRB determined that informed consent from individual participants was not required for this research. The study's methodologies were designed to ensure the confidentiality and anonymity of all participants involved, adhering strictly to ethical guidelines for educational research.
+
+
+
+
+
+### Results
+
+-   Justification of model choices.
+
+
+#### **Nudge Development Process**:
+
+```         
+-   Detailed steps in nudge creation.
+-   Basis for selecting specific nudges.
+```
+
+#### **Application Protocol**:
+
+```         
+-   Procedure for nudge application.
+-   Monitoring and adaptation strategies.
+```
+
+#### **Impact Assessment Method**:
+
+```         
+-   Techniques for evaluating nudge effectiveness.
+-   Statistical methods for analyzing outcomes.
+-   Comprehensive Methodological Reporting: Ensure thorough reporting of all methods and experimental parameters.
+```
