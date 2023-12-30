@@ -5,14 +5,22 @@ bibliography: references.bib
 ---
 
 ```{r import}
+library(data.table)
+library(dtplyr)
 library(tidyverse)
-library(zoo)
+# library(zoo)
 library(ggrepel)
 library(gt)
-library(furrr)
 set.seed(794563797)
 # Timestamp: 2023-12-21 21:42:25 UTC
 # © 1998-2023 RANDOM.ORG
+
+```
+
+# Data
+
+```{r preprocessing}
+#| eval: false
 
 teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
 classroom_student_usage <- read.csv("Data/raw/Classroom Student Usage - Time Series 2020-10-09T1616.csv")
@@ -20,19 +28,12 @@ classroom_info <- read.csv("Data/raw/Classroom Info 2020-10-09T1617.csv")
 classroom_teacher_lookup <- read.csv("Data/raw/Classroom-Teacher Lookup 2020-10-09T1618.csv")
 school_info <- read.csv("Data/raw/School Info 2020-10-09T1619.csv")
 la_usage_types <- read_csv("Data/raw/la_usage_types.csv")
-```
 
-# Data
-
-```{r preprocessing}
 teacher_usage <- teacher_usage %>%
   mutate(
     # Noting week, month, and year to summarize teacher behavior:
-    week = lubridate::week(Usage.Time),
+    week = lubridate::isoweek(Usage.Time),
     year = lubridate::year(Usage.Time),
-    wday = lubridate::wday(Usage.Time),
-    hour = lubridate::hour(Usage.Time),
-    whour = (wday - 1)*24 + hour,
     # Transforming Event.Type for "Resource Downloaded"
     Event.Type = ifelse(Event.Type == "Resource Downloaded",
                         paste0("RD.", Curriculum.Resource.Category),
@@ -52,8 +53,8 @@ teacher_usage_total <- teacher_usage %>%
 # Teacher exclusion
 active_teachers <- teacher_usage_total %>%
   count(Adult.User.ID) %>%
-  # Remove teachers inactive for more than 4 weeks
-  filter(n >= 4) %>%
+  # Remove teachers active for less than 8 weeks
+  filter(n >= 8) %>%
   pull(Adult.User.ID)
 
 # Classroom exclusion
@@ -69,10 +70,7 @@ classroom_teacher_lookup <- classroom_teacher_lookup %>%
                group_by(Classroom.ID) %>%
                # Delete classrooms with multiple schools
                filter(n_distinct(MDR.School.ID) == 1) %>%
-               ungroup(), by = "Classroom.ID") %>%
-  mutate(
-    Grade.Level = factor(Grade.Level, ordered = TRUE)
-    )
+               ungroup(), by = "Classroom.ID")
 
 # Merge teacher and student data
 # Merging with the classroom info for further merge with teacher info
@@ -81,9 +79,10 @@ teacher_student_usage_subset <- classroom_student_usage %>%
                # Filtering active teachers
                filter(Teacher.User.ID %in% active_teachers),
              by = "Classroom.ID") %>%
-  mutate(week = lubridate::week(Usage.Week),
+  mutate(week = lubridate::isoweek(Usage.Week),
          year = lubridate::year(Usage.Week)) %>%
-  inner_join(teacher_usage_total,
+  full_join(teacher_usage_total %>%
+              filter(Adult.User.ID %in% active_teachers),
              by = c("Teacher.User.ID" = "Adult.User.ID",
                     "week", "year")) %>%
   # Replace NAs with 0
@@ -117,23 +116,22 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
          charterSchool = Is.Charter..Yes...No.,
          schoolAccount = MDR.School.has.School.Account..Yes...No.,
          zipcode = School.Address...Zipcode) %>%
-  mutate(medianIncome = factor(medianIncome, ordered = TRUE),
-         povertyLevel = factor(povertyLevel, ordered = TRUE),
-         charterSchool = case_when(charterSchool == "No" ~ 0,
+  mutate(charterSchool = case_when(charterSchool == "No" ~ 0,
                                    charterSchool == "Yes" ~ 1,
                                    .default = NA),
          schoolAccount = case_when(schoolAccount == "No" ~ 0,
                                    schoolAccount == "Yes" ~ 1,
-                                   .default = NA))
-  
-# Processing students' data
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  mutate(month = month(Usage.Week)) %>%
-  # Remove June/July/August
-  filter(!month %in% c(6, 7, 8))
+                                   .default = NA),
+         month = month(Usage.Week))
 
 # Filtering active teacher-classrooms
 active_classrooms <- teacher_student_usage_subset %>%
+  # At least 5 students enrolled
+  filter(Students...Total >= 5) %>%
+  # Do not count June/July/August
+  filter(!month %in% c(6, 7, 8),
+         # Do not count inactive weeks
+         !(is.na(Sessions.per.Active.User) & is.na(`User Session`))) %>%
   count(Classroom.ID) %>%
   # Remove teachers or classes active for at least 3 months
   filter(n >= 12) %>%
@@ -142,14 +140,26 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% active_classrooms)
 
 average_student <- teacher_student_usage_subset %>%
-  # At least 5 students
-  filter(Students...Total >= 5) %>%
   group_by(Classroom.ID) %>%
   summarise(Active.Users...Total = mean(Active.Users...Total)) %>%
-  # At least one active students per week on average
-  filter(Active.Users...Total > 1)
+  # Positive number of active students per week
+  filter(Active.Users...Total > 1/3)
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% average_student$Classroom.ID)
+
+teacher_student_usage_subset <- teacher_student_usage_subset %>%
+  # Do not include inactive weeks
+  filter(!(is.na(Sessions.per.Active.User) & is.na(`User Session`))) %>%
+  mutate(
+    District.Rollup.ID = as.character(District.Rollup.ID),
+    curriculum = as.character(curriculum),
+    Minutes.per.Active.User = as.numeric(Minutes.per.Active.User)
+    ) %>%
+  # Fill all NAs with 0 (except `curriculum`)
+  mutate(across(where(is.numeric), ~ replace_na(., 0)))
+
+# Write to csv
+write.csv(teacher_student_usage_subset, "./Data/df.csv")
 
 ```
 
@@ -158,6 +168,9 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
 ```{r}
 #| label: tbl-summary
 #| tbl-cap: "Pre-experimental Intervention Data. This table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
+
+teacher_student_usage_subset <- read.csv(file = "./Data/df.csv")
+teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
 
 # Pre-calculate unique teachers and classrooms
 unique_teachers <- unique(teacher_student_usage_subset$Teacher.User.ID)
@@ -247,6 +260,14 @@ gt_table
 
 ```
 
+```{r clean-environment}
+#| include: false
+
+rm(list = setdiff(ls(), c("teacher_student_usage_subset", "teacher_usage")))
+gc(verbose = FALSE)
+
+```
+
 -   Specific teacher and student metrics collected.
 
 <!-- SEAN: Help troubleshoot map -->
@@ -260,12 +281,13 @@ gt_table
 library(sf)
 library(tidygeocoder)
 library(tigris)
+library(furrr)
+plan(strategy = "multisession", workers = availableCores())
 
 # Batch geocoding
 # Sys.setenv(GEOCODIO_API_KEY = "")
 unique_zipcodes <- unique(teacher_student_usage_subset$zipcode) %>%
   as.list()
-plan(strategy = "multisession", workers = availableCores())
 address_geodata <- furrr::future_map_dfr(.x = unique_zipcodes, 
                                ~ geo(postalcode = .x,
                                      country = "United States",
@@ -339,6 +361,11 @@ ggplot() +
 
 ```
 
+# Results
+
+-   Data-driven Nudge Engineering with Habit-based Regression
+-   Justification of model choices.
+
 # Materials and Methods
 
 ## Study 1
@@ -374,7 +401,7 @@ library(ica)
 # Perform ICA to choose number of components
 # Removing columns with zero variance
 ICA_cols <- teacher_student_usage_subset %>%
-  select(`User Session`:RD.foundational_lesson_guidance) %>%
+  select(RD.elementary_schedule:RD.foundational_lesson_guidance) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
@@ -425,6 +452,396 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
   )
 
 ```
+
+### Censored Panel Regression
+
+-   Explanation of statistical models used.
+-   Details of any sensitivity or robustness checks.
+-   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
+
+```{r}
+library(plm)
+
+# Define the columns to be used in the formula
+columns_used <- colnames(teacher_student_usage_subset %>%
+                           select(teacher_number_classes, Grade.Level, MDR.School.ID, 
+                                  Students...Total, teacher_number_classes, 
+                                  # medianIncome:schoolAccount,
+                                  ic1:ic3))
+# Create the formula
+fmla_str <- sprintf("logBadges ~ %s",
+                    paste(sprintf("`%s`", columns_used), collapse = " + "))
+fmla <- as.formula(fmla_str)
+
+# Define the panel model index
+pUsage <- pdata.frame(
+  teacher_student_usage_subset %>%
+    mutate(Classroom.ID = factor(Classroom.ID, ordered = FALSE),
+           Teacher.User.ID = factor(Teacher.User.ID, ordered = FALSE),
+           MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
+           District.Rollup.ID = factor(District.Rollup.ID, ordered = FALSE),
+           Grade.Level = factor(Grade.Level, ordered = TRUE),
+           medianIncome = factor(medianIncome, ordered = TRUE),
+           povertyLevel = factor(povertyLevel, ordered = TRUE),
+           zipcode = factor(zipcode, ordered = FALSE)) %>%
+    group_by(Teacher.User.ID) %>%
+    mutate(week = week - lubridate::isoweek(min(Usage.Week)) + 1) %>%
+    mutate(week = ifelse(week < 1 | year == 2020,
+                         week + 52 * (2020 - lubridate::year(min(Usage.Week))),
+                         week)) %>%
+    ungroup() %>%
+    mutate(logBadges = log(Badges.per.Active.User + 1)),
+  index = c("Classroom.ID", "week", "Teacher.User.ID"))
+
+# Create and summarize the 'within' model directly
+## SEAN: please compare with objfun = "lad" (maybe more robust to outliers?)
+within_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
+                     lower = 0, sample = "cens")
+# within_model <- plm(fmla, data = pUsage, model = "within")
+summary(within_model)
+
+# Hausman Test supports Fixed Effects
+# re <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
+#            lower = 0, sample = "cens")
+# phtest(within_model, re)
+# 
+# data:  fmla
+# chisq = 385.17, df = 3, p-value < 2.2e-16
+# alternative hypothesis: one model is inconsistent
+
+```
+
+## Study 1b
+
+### Regression Analysis Methodology
+
+```{r preprocessing-habits}
+#| eval: false
+
+# Prepare data
+setDT(teacher_usage)
+teacher_usage[, Date := as.Date(Usage.Time)]
+
+# Sequence of dates for the overall grid expand
+date_seq <- seq.Date(min(teacher_usage$Date),
+                     max(teacher_usage$Date),
+                     by = "day")
+
+# Logged indicator
+teacher_usage[, logged := 1]
+
+# Create combinations of Adult.User.ID and Date, and merge with logged data
+df <- CJ(Adult.User.ID = unique(teacher_usage$Adult.User.ID), Date = date_seq)
+df <- df[teacher_usage, on = .(Adult.User.ID, Date),
+         `:=`(logged = i.logged,
+              Minutes.on.Zearn...Total = i.Minutes.on.Zearn...Total)]
+df[is.na(logged), logged := 0]
+df[is.na(Minutes.on.Zearn...Total), Minutes.on.Zearn...Total := 0]
+
+# Code datetime variables and compute additional metrics
+setorder(df, Adult.User.ID, Date)
+df[, `:=`(
+  Year = year(Date),
+  Month = month(Date),
+  Week = isoweek(Date),
+  dayofweek = wday(Date, label = TRUE, week_start = 1),
+  prev_visits = cumsum(logged) - logged
+  ), by = Adult.User.ID]
+df[, `:=`(
+  prev_dow_visits = cumsum(logged) - logged
+  ), by = .(Adult.User.ID, dayofweek)]
+
+# Streak, time lag, and other computations
+df[, `:=`(
+  lag.logged = shift(logged, 1, type = "lag", fill = 0)
+  ), by = Adult.User.ID]
+df[, start_streak:=as.integer(logged == 1 & lag.logged == 0)]
+df[, start_streak:=cumsum(start_streak), by = Adult.User.ID]
+df[lag.logged==0, streak:=as.double(0)]
+df[is.na(streak), streak:=as.double(1:.N), by = .(Adult.User.ID, start_streak)]
+
+# Time lag calculation
+df[, `:=`(
+  start_streak_lag = shift(start_streak, 1, fill = 0)
+), by = Adult.User.ID]
+
+# Streak calculation by day of week
+df[,attended_lag_dow:=shift(logged, 1, fill = 0),
+   by = .(Adult.User.ID, dayofweek)]
+df[, `:=`(
+  streak_dow = fcase(
+    attended_lag_dow == 0, as.double(0),
+    default = as.double(NA)
+  ),
+  start_streak_dow = as.numeric(logged == 1 & attended_lag_dow == 0)
+  ), by = .(Adult.User.ID, dayofweek)]
+df[, start_streak_dow := cumsum(start_streak_dow),
+   by = .(Adult.User.ID, dayofweek)]
+df[is.na(streak_dow),
+   streak_dow := 1:.N,
+   by = .(Adult.User.ID, start_streak_dow, dayofweek)]
+
+# Previous week visits calculations
+## Calculate weekly visits
+weekly_logged <- df[, .(week_visits = sum(logged)),
+                    by = .(Adult.User.ID, Week, Year)]
+## Calculate previous week visits
+setorder(weekly_logged, Adult.User.ID, Year, Week)
+weekly_logged[, prev_week_visits := shift(week_visits, 1, fill = 0),
+               by = Adult.User.ID]
+df <- merge(df, weekly_logged,
+            by = c("Adult.User.ID", "Week", "Year"), all.x = TRUE)
+setorder(df, Adult.User.ID, Date)
+
+# Calculate previous day of week visit
+df[, prev_dow_visit := shift(logged, 1, fill = 0),
+   by = .(Adult.User.ID, dayofweek)]
+# Previous minutes spent
+df[, prev_min_zearn := shift(Minutes.on.Zearn...Total, 1, fill = 0),
+   by = Adult.User.ID]
+
+# Add a time column, a sequence for each Adult.User.ID
+df[, time := seq_len(.N), by = Adult.User.ID]
+# Calculate the first time point for each Adult.User.ID where logged == 1
+first_time_index <- df[logged == 1,
+                       .(first_time = min(time)),
+                       by = Adult.User.ID]
+df[first_time_index,
+   on = .(Adult.User.ID),
+   `:=`(first_time = i.first_time)]
+df[, first_time := time - first_time]
+# Calculate the last time point for each Adult.User.ID where logged == 1
+last_time_index <- df[logged == 1,
+                      .(last_time = max(time)),
+                      by = Adult.User.ID]
+df[last_time_index,
+   on = .(Adult.User.ID),
+   `:=`(last_time = i.last_time)]
+df[, last_time := last_time - time]
+# Filter out rows outside the first and last logged==1
+df <- df[first_time >= 0 & last_time >= 0]
+
+df[, `:=`(
+  first_week = isoweek(min(Date)),
+  first_year = year(min(Date)),
+  time = 1:.N
+  ), by = Adult.User.ID]
+df[, Week := Week - first_week + 1]
+df[, Week := fifelse(Week < 1 | Year == 2020,
+                     Week + 52 * (2020 - first_year),
+                     Week), by = Adult.User.ID]
+
+df[, `:=`(
+  mean_visits = mean(logged),
+  prev_freq = prev_visits / time,
+  prev_dow_freq = prev_dow_visits / Week
+  ), by = Adult.User.ID]
+  
+df[lag.logged==1, time_lag:=1]
+df[lag.logged==0, time_lag:=as.double(1:.N)+1,
+   by = .(Adult.User.ID, start_streak_lag)]
+df[time == 1, time_lag:=0, by = Adult.User.ID]
+
+# Finalize the dataset
+# Cleanup: Remove temporary columns
+df[, c("first_time", "last_time", "first_week", "first_year") := NULL]
+setorder(df, Adult.User.ID, Date)
+# Write to csv
+fwrite(df, "./Data/df_habits.csv")
+
+```
+
+<!-- SEAN: Let's try a Panel model here as well. We might need to use LASSO because we have so many variables (we also want to include interactions of weekdays with streak_dow). Panel is what we did for the previous analysis, but it was a bit more complicated with the habitization part. We can just do one mixed-effects LASSO and see if the results coincide with the analysis below and with the previous LASSO analysis. -->
+
+```{r habits}
+
+# Read in the data
+df <- fread(file = "./Data/df_habits.csv") %>%
+  lazy_dt()
+
+df_transformed <- df %>%
+  filter(Adult.User.ID %in%
+           unique(teacher_student_usage_subset$Teacher.User.ID)) %>%
+  mutate(dayofweek = factor(dayofweek, ordered = FALSE,
+                            levels = c("Mon", "Tue", "Wed", "Thu",
+                                       "Fri", "Sat", "Sun")),
+         Month = factor(Month, ordered = FALSE),
+         week_label = isoweek(Date)) %>%
+  pivot_wider(names_from = dayofweek, values_from = logged, 
+              values_fill = list(logged = 0)) %>%
+  group_by(Adult.User.ID, Week) %>%
+  summarize(across(c(Mon:Sun), sum, na.rm = TRUE),
+            Total_Minutes_on_Zearn = sum(Minutes.on.Zearn...Total, na.rm = TRUE),
+            mean_streak = mean(streak, na.rm = TRUE),
+            mean_streak_dow = mean(streak_dow, na.rm = TRUE),
+            mean_visits = mean(mean_visits, na.rm = TRUE),
+            mean_time_lag = mean(time_lag, na.rm = TRUE),
+            Month = first(Month),
+            Year = first(Year),
+            week_label = first(week_label),
+            .groups = 'drop')
+
+# Pivot longer to aggregate by month
+df_monthly <- df_transformed %>%
+  pivot_longer(cols = Mon:Sun, names_to = "dayofweek", values_to = "logged") %>%
+  group_by(Adult.User.ID, Month) %>%
+  summarize(total_logged_per_month = as.double(sum(logged, na.rm = TRUE))) %>%
+  # Pivot wider to create a column for each month
+  pivot_wider(names_from = Month, values_from = total_logged_per_month,
+              names_prefix = "month_",
+              values_fill = list(total_logged_per_month = 0)) %>%
+  mutate(row_total = rowSums(select(., starts_with("month_")))) %>%
+  mutate(across(starts_with("month_"), ~ ./row_total)) %>%
+  select(-row_total)
+
+pUsage <- pdata.frame(
+  df_transformed %>%
+    group_by(Adult.User.ID) %>%
+    summarize(across(c(Mon:Sun), sum, na.rm = TRUE),
+              across(c(Total_Minutes_on_Zearn:mean_time_lag), mean, na.rm = TRUE),
+              .groups = 'drop') %>%
+    mutate(row_total = rowSums(select(., c(Mon:Sun)))) %>%
+    mutate(across(c(Mon:Sun), ~ ./row_total)) %>%
+    select(-row_total) %>%
+    inner_join(df_monthly, by = "Adult.User.ID") %>%
+    inner_join(teacher_student_usage_subset %>%
+                 lazy_dt() %>%
+                 group_by(Teacher.User.ID, week, MDR.School.ID) %>%
+                 summarize(Badges.per.Active.User = sum(Badges.per.Active.User),
+                           Year = first(year),
+                           .groups = 'drop') %>%
+                 group_by(Teacher.User.ID, MDR.School.ID) %>%
+                 summarize(Badges.per.Active.User = mean(Badges.per.Active.User),
+                           .groups = 'drop'),
+               by = c("Adult.User.ID" = "Teacher.User.ID")
+               # by = c("Adult.User.ID" = "Teacher.User.ID",
+               #        "week_label" = "week", "Year")
+               ) %>%
+    mutate(Adult.User.ID = factor(Adult.User.ID, ordered = FALSE),
+           MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
+           logBadges = log(Badges.per.Active.User + 1)) %>%
+    as_tibble(),
+  index = c("MDR.School.ID"))
+  # index = c("Adult.User.ID", "Week", "MDR.School.ID"))
+
+panel_model <- plm(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat +
+                     month_1 + month_2 + month_3 + month_4 + month_5 + month_6 +
+                     month_8 + month_9 + month_10 + month_11 + month_12 +
+                     Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
+                     mean_visits + mean_time_lag,
+                   data = pUsage, model = "within")
+# panel_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
+#                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
+#                      mean_visits + mean_time_lag,
+#                     data = pUsage, model = "fd", objfun = "lsq",
+#                     lower = 0, sample = "cens")
+
+summary(panel_model)
+
+```
+
+-   Detailed steps in the regression analysis.
+-   Explanation of fixed effects model.
+-   Software and tools used in analysis.
+-   Publishing Negative Data: Include any negative data that did not support hypotheses.
+-   List of all statistical software and tools.
+-   Versions and settings used.
+-   Thorough Description of Methods: Clearly report experimental parameters.
+
+## Study 2
+
+### Pre-registration Details
+
+-   Date created: September 14, 2021.
+-   Confirmation that no data were collected prior to the study.
+-   Hypotheses: H1 and H2 with detailed descriptions.
+-   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
+-   Conditions: Description of "Empathy" treatment and "Control Condition".
+-   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
+-   Outliers and Exclusions: Specific criteria for exclusion of observations.
+-   Sample Size: Number of participants and criteria for eligibility.
+-   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+
+### Evaluation / Impact Assessment
+
+-   Methods of measuring intervention impact.
+-   Statistical analysis of results.
+-   Detailed Reporting of Methodologies: Include comprehensive description of all methodologies used.
+-   Outcome Measure
+-   Specific measures used to evaluate the impact of interventions.
+-   Techniques for evaluating nudge effectiveness.
+-   Comprehensive Methodological Reporting: Ensure thorough reporting of all methods and experimental parameters.
+
+## Study 2a
+
+### Intervention Design
+
+-   Steps in developing empathy-based interventions.
+-   Criteria for intervention selection.
+-   Nudge Engineering / Increasing Engagement Through Empathy
+
+### Implementation Method
+
+-   Detailed procedure for implementing interventions.
+-   Timeline and phases of implementation.
+
+## Study 2b
+
+### Intervention Design
+
+-   Nudge Engineering / Increasing Engagement Through Habitization
+
+### Implementation Method
+
+-   Detailed procedure for implementing interventions.
+
+```{stata}
+
+
+
+```
+
+### Ethical Considerations and IRB Approval
+
+This study was conducted in accordance with ethical standards and received approval from the Institutional Review Board (IRB) at the University of Pennsylvania. Given the nature of the data, which included de-identified and aggregated information, the IRB determined that informed consent from individual participants was not required for this research. The study's methodologies were designed to ensure the confidentiality and anonymity of all participants involved, adhering strictly to ethical guidelines for educational research.
+
+# Supplementary Information
+
+## Supplementary Methods
+
+### Independent Component Analysis (ICA)
+
+We implement the FastICA algorithm [@hyvärinen2000] to estimate independent components from our dataset. In this model, matrix $X = {x_{ij}}_{I \times J}$ , consisting of $I$ samples across $J$ random variables, is expressed as a linear mixture of independent components $C$, represented by:
+
+$$
+X = C' M + E.
+$$
+
+Here, $C$ holds the independent components, $M$ is a mixing matrix, and $E$ denotes the noise. The aim is to minimize mutual information between components in $C$, which is achieved by maximizing their marginal negentropy, thereby rendering the columns of $C$ statistically independent.
+
+The FastICA process begins by transforming $X$ into a whitened matrix $Y$, ensuring uncorrelated variables with unit variance. This transformation is achieved through eigenvalue decomposition:
+
+$$
+Y = X \times \begin{bmatrix} \frac{\mathbf{v_1}}{\sqrt{\lambda_1}} & \frac{\mathbf{v_2}}{\sqrt{\lambda_2}} & \frac{\mathbf{v_3}}{\sqrt{\lambda_3}} \end{bmatrix},
+$$
+
+where ($\lambda_1, \lambda_2, \lambda_3$) and ($\mathbf{v_1}, \mathbf{v_2}, \mathbf{v_3}$) are, respectively, the eigenvalues and eigenvectors of $\frac{X'X}{I}$.
+
+Afterward, the algorithm approximates the negentropy with
+
+$$
+\hat{\theta}(c_n) = (\mathbb{E}[\ln(\cosh(c_n))] − \mathbb{E}[\ln(\cosh(z))])^2
+$$
+
+where $c_n, n \in {1, 2, 3}$, is one of the components, and $z$ is a Gaussian variable with zero mean and unit variance. FastICA iteratively maximizes this value across all components, producing an orthogonal rotation matrix $R_{3 \times 3}$ such that $C = YR$.
+
+For more details on ICA and the FastICA algorithm, see [@hyvärinen2000a; @helwig2013].
+
+## Supplementary Tables
+
+## Supplementary Discussion
+
+### Robustnes Checks
 
 ```{r PCA}
 #| eval: false
@@ -477,205 +894,6 @@ ica_loadings_table <- ica_loadings_df %>%
 ica_loadings_table
 
 ```
-
-### **Statistical Considerations**:
-
--   Explanation of statistical models used.
--   Details of any sensitivity or robustness checks.
--   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
-
-```{r}
-library(plm)
-
-# Define the columns to be used in the formula
-columns_used <- colnames(teacher_student_usage_subset %>%
-                           select(teacher_number_classes, Grade.Level,
-                                  Students...Total, teacher_number_classes, 
-                                  # medianIncome:schoolAccount,
-                                  ic1:ic3))
-# Create the formula
-fmla_str <- sprintf("logBadges ~ %s",
-                    paste(sprintf("`%s`", columns_used), collapse = " + "))
-fmla <- as.formula(fmla_str)
-
-# Define the panel model index
-pUsage <- pdata.frame(teacher_student_usage_subset %>%
-                        group_by(Teacher.User.ID) %>%
-                        mutate(week = week - min(week) + 1) %>%
-                        ungroup() %>%
-                        mutate(logBadges = log(Badges.per.Active.User + 1)),
-                      index = c("Classroom.ID", "week", "Teacher.User.ID"))
-
-# Create and summarize the 'within' model directly
-## SEAN: please compare with objfun = "lad" (maybe more robust to outliers?)
-within_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
-                     lower = 0, sample = "cens")
-# within_model <- plm(fmla, data = pUsage, model = "within")
-summary(within_model)
-
-# Hausman Test supports Fixed Effects
-# re <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
-#            lower = 0, sample = "cens")
-# phtest(within_model, re)
-# 
-# data:  fmla
-# chisq = 385.17, df = 3, p-value < 2.2e-16
-# alternative hypothesis: one model is inconsistent
-
-```
-
-## Study 1b: Data-driven Nudge Engineering with Habit-based Regression
-
-### **Data Utilization**:
-
-```         
--   Criteria for data selection.
--   Description of data preprocessing.
--   Pre-registration of Study: If applicable, mention if this study was pre-registered.
-```
-
-### **Regression Analysis Methodology**:
-
-```         
--   Detailed steps in the regression analysis.
--   Explanation of fixed effects model.
--   Software and tools used in analysis.
--   Publishing Negative Data: Include any negative data that did not support hypotheses.
-```
-
-### **Statistical Tools and Software**:
-
-```         
--   List of all statistical software and tools.
--   Versions and settings used.
--   Thorough Description of Methods: Clearly report experimental parameters.
-```
-
-## Study 2a: Nudge Engineering / Increasing Engagement Through Empathy
-
-### **Pre-registration Details**:
-
-```         
--   Date created: September 14, 2021.
--   Confirmation that no data were collected prior to the study.
--   Hypotheses: H1 and H2 with detailed descriptions.
--   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
--   Conditions: Description of "Empathy" treatment and "Control Condition".
--   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
--   Outliers and Exclusions: Specific criteria for exclusion of observations.
--   Sample Size: Number of participants and criteria for eligibility.
--   Additional Analyses: Detailed list of supplementary analyses to be conducted.
-```
-
-### **Intervention Design**:
-
-```         
--   Steps in developing empathy-based interventions.
--   Criteria for intervention selection.
-```
-
-### **Implementation Method**:
-
-```         
--   Detailed procedure for implementing interventions.
--   Timeline and phases of implementation.
-```
-
-### **Evaluation Technique**:
-
-```         
--   Methods of measuring intervention impact.
--   Statistical analysis of results.
--   Detailed Reporting of Methodologies: Include comprehensive description of all methodologies used.
-```
-
-### **Outcome Measure**:
-
-```         
--   Specific measures used to evaluate the impact of interventions.
-```
-
-## Study 2b: Nudge Engineering / Increasing Engagement Through Habitization
-
-### **Pre-registration Details**:
-
-```         
--   Date created: September 14, 2021.
--   Confirmation that no data were collected prior to the study.
--   Hypotheses: H1, H2, and H3 with detailed descriptions.
--   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
--   Conditions: Description of "Friday log-in", "Wednesday log-in", and "Control Condition".
--   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
--   Outliers and Exclusions: Specific criteria for exclusion of observations.
--   Sample Size: Number of participants and criteria for eligibility.
--   Additional Analyses: Detailed list of supplementary analyses to be conducted.
-```
-
-### Ethical Considerations and IRB Approval
-
-This study was conducted in accordance with ethical standards and received approval from the Institutional Review Board (IRB) at the University of Pennsylvania. Given the nature of the data, which included de-identified and aggregated information, the IRB determined that informed consent from individual participants was not required for this research. The study's methodologies were designed to ensure the confidentiality and anonymity of all participants involved, adhering strictly to ethical guidelines for educational research.
-
-## Results
-
--   Justification of model choices.
-
-### **Nudge Development Process**:
-
-```         
--   Detailed steps in nudge creation.
--   Basis for selecting specific nudges.
-```
-
-### **Application Protocol**:
-
-```         
--   Procedure for nudge application.
--   Monitoring and adaptation strategies.
-```
-
-### **Impact Assessment Method**:
-
-```         
--   Techniques for evaluating nudge effectiveness.
--   Statistical methods for analyzing outcomes.
--   Comprehensive Methodological Reporting: Ensure thorough reporting of all methods and experimental parameters.
-```
-
-# Supplementary Information
-
-## Supplementary Methods
-
-### Independent Component Analysis (ICA)
-
-We implement the FastICA algorithm [@hyvärinen2000] to estimate independent components from our dataset. In this model, matrix $X = {x_{ij}}_{I \times J}$ , consisting of $I$ samples across $J$ random variables, is expressed as a linear mixture of independent components $C$, represented by:
-
-$$
-X = C' M + E.
-$$
-
-Here, $C$ holds the independent components, $M$ is a mixing matrix, and $E$ denotes the noise. The aim is to minimize mutual information between components in $C$, which is achieved by maximizing their marginal negentropy, thereby rendering the columns of $C$ statistically independent.
-
-The FastICA process begins by transforming $X$ into a whitened matrix $Y$, ensuring uncorrelated variables with unit variance. This transformation is achieved through eigenvalue decomposition:
-
-$$
-Y = X \times \begin{bmatrix} \frac{\mathbf{v_1}}{\sqrt{\lambda_1}} & \frac{\mathbf{v_2}}{\sqrt{\lambda_2}} & \frac{\mathbf{v_3}}{\sqrt{\lambda_3}} \end{bmatrix},
-$$
-
-where ($\lambda_1, \lambda_2, \lambda_3$) and ($\mathbf{v_1}, \mathbf{v_2}, \mathbf{v_3}$) are, respectively, the eigenvalues and eigenvectors of $\frac{X'X}{I}$.
-
-Afterward, the algorithm approximates the negentropy with
-
-$$
-\hat{\theta}(c_n) = (\mathbb{E}[\ln(\cosh(c_n))] − \mathbb{E}[\ln(\cosh(z))])^2
-$$
-
-where $c_n, n \in {1, 2, 3}$, is one of the components, and $z$ is a Gaussian variable with zero mean and unit variance. FastICA iteratively maximizes this value across all components, producing an orthogonal rotation matrix $R_{3 \times 3}$ such that $C = YR$.
-
-For more details on ICA and the FastICA algorithm, see [@hyvärinen2000a; @helwig2013].
-
-## Supplementary Tables
-
-## Supplementary Discussion
 
 ## Supplementary Equations
 
