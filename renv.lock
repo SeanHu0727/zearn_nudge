@@ -196,6 +196,17 @@
       ],
       "Hash": "0cf10dab0d023d5b46a5a14387556891"
     },
+    "Statamarkdown": {
+      "Package": "Statamarkdown",
+      "Version": "0.9.2",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "knitr",
+        "xfun"
+      ],
+      "Hash": "e059140679930331f28283a1f6e9156a"
+    },
     "V8": {
       "Package": "V8",
       "Version": "4.4.1",
@@ -869,22 +880,6 @@
         "methods"
       ],
       "Hash": "47b5f30c720c23999b913a1a635cf0bb"
-    },
-    "furrr": {
-      "Package": "furrr",
-      "Version": "0.3.1",
-      "Source": "Repository",
-      "Repository": "RSPM",
-      "Requirements": [
-        "R",
-        "future",
-        "globals",
-        "lifecycle",
-        "purrr",
-        "rlang",
-        "vctrs"
-      ],
-      "Hash": "da7a4c32196cb2262a41dd5a25d486ff"
     },
     "future": {
       "Package": "future",

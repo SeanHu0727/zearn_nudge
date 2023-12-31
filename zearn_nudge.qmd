@@ -11,13 +11,36 @@ library(tidyverse)
 # library(zoo)
 library(ggrepel)
 library(gt)
+library(Statamarkdown)
 set.seed(794563797)
 # Timestamp: 2023-12-21 21:42:25 UTC
 # © 1998-2023 RANDOM.ORG
 
 ```
 
-# Data
+# Results
+
+-   Data-driven Nudge Engineering with Habit-based Regression
+
+-   Justification of model choices. There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
+
+-   Detailed steps in the regression analysis.
+
+-   Explanation of fixed effects model.
+
+-   Software and tools used in analysis.
+
+-   Publishing Negative Data: Include any negative data that did not support hypotheses.
+
+-   List of all statistical software and tools.
+
+-   Versions and settings used.
+
+-   Thorough Description of Methods: Clearly report experimental parameters.
+
+# Materials and Methods
+
+## Data
 
 ```{r preprocessing}
 #| eval: false
@@ -273,7 +296,6 @@ gc(verbose = FALSE)
 <!-- SEAN: Help troubleshoot map -->
 
 ```{r}
-#| eval: false
 #| cache: true
 #| label: fig-teachers-map
 #| fig-cap: "Geographical distribution of teachers across various parishes in Louisiana, and the top 5 cities with the highest number of teachers."
@@ -361,13 +383,6 @@ ggplot() +
 
 ```
 
-# Results
-
--   Data-driven Nudge Engineering with Habit-based Regression
--   Justification of model choices.
-
-# Materials and Methods
-
 ## Study 1
 
 ### Data Collection
@@ -392,7 +407,7 @@ We defined the inclusion criteria for classrooms strictly as such:
 
 ### Independent Component Analysis (ICA)
 
-We extracted all teacher behavioral variables from the dataset that displayed non-zero variance and standardized them to have a zero mean and unit variance. To determine the ideal number of independent components, we performed ICA using a range of components from 1 to 10. Our decision on the optimal number was informed by recognizing the 'elbow' on the scree plot generated from the results. Ultimately, the scree plot revealed three independent components. We used the `icafast` function from the R `ica` package for all ICAs conducted [@helwig2022].
+We extracted all teacher behavioral variables from the dataset that displayed non-zero variance and standardized them to have a zero mean and unit variance. To determine the ideal number of independent components, we performed ICA using a range of components from 1 to 10. Our decision on the optimal number was informed by recognizing the 'elbow' on the scree plot generated from the results, yielding three independent components. We used the `icafast` function from the R `ica` package for all ICAs conducted [@helwig2022].
 
 ```{r ICA}
 
@@ -455,9 +470,13 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
 
 ### Censored Panel Regression
 
--   Explanation of statistical models used.
--   Details of any sensitivity or robustness checks.
--   Training on Statistical Methods: Detail any specific statistical training or standardized methodologies used.
+We estimated a censored panel regression model using a first difference approach, with the `pldv` function from the `plm` package [@croissant2008] in R and a lower bound of 0 for the dependent variable:
+
+$$
+\Delta \ln (\text{Badges}_{itc} + 1) = \beta_0 + \beta_1 \Delta \text{(IC1)}_{it} + \beta_2 \Delta \text{(IC2)}_{it} + \beta_3 \Delta \text{(IC3)}_{it} + \Delta \epsilon_{itc}
+$$
+
+where $i, c, t$ index the teacher, class, and week, respectively. Standard errors are clustered at the classroom level with the `vcovHC` function [@millo2017] in R..
 
 ```{r}
 library(plm)
@@ -465,7 +484,7 @@ library(plm)
 # Define the columns to be used in the formula
 columns_used <- colnames(teacher_student_usage_subset %>%
                            select(teacher_number_classes, Grade.Level, MDR.School.ID, 
-                                  Students...Total, teacher_number_classes, 
+                                  Students...Total, 
                                   # medianIncome:schoolAccount,
                                   ic1:ic3))
 # Create the formula
@@ -476,6 +495,7 @@ fmla <- as.formula(fmla_str)
 # Define the panel model index
 pUsage <- pdata.frame(
   teacher_student_usage_subset %>%
+    arrange(Classroom.ID, year, week) %>%
     mutate(Classroom.ID = factor(Classroom.ID, ordered = FALSE),
            Teacher.User.ID = factor(Teacher.User.ID, ordered = FALSE),
            MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
@@ -494,16 +514,18 @@ pUsage <- pdata.frame(
   index = c("Classroom.ID", "week", "Teacher.User.ID"))
 
 # Create and summarize the 'within' model directly
-## SEAN: please compare with objfun = "lad" (maybe more robust to outliers?)
-within_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
-                     lower = 0, sample = "cens")
-# within_model <- plm(fmla, data = pUsage, model = "within")
-summary(within_model)
+## SEAN: please compare:
+## 1) RE vs FD: "There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
+## 2) with objfun = "lad" (maybe more robust to outliers?)
+ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
+                         lower = 0, sample = "cens")
+# ica_fe_model <- censReg::censReg(fmla, data = pUsage)
+summary(ica_fd_model, vcov = vcovHC(ica_fd_model, type = "HC3", cluster = "group"))
 
 # Hausman Test supports Fixed Effects
-# re <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
-#            lower = 0, sample = "cens")
-# phtest(within_model, re)
+# ica_re_model <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
+#                      lower = 0, sample = "cens")
+# phtest(ica_fd_model, ica_re_model)
 # 
 # data:  fmla
 # chisq = 385.17, df = 3, p-value < 2.2e-16
@@ -513,7 +535,18 @@ summary(within_model)
 
 ## Study 1b
 
-### Regression Analysis Methodology
+### Fixed-Effects Regression
+
+We estimated a fixed effects model using the `plm` function[@croissant2008] in R:
+
+$$
+\begin{align*}
+\ln \left( \sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} + 1 \right) = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{LoginRatio}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{LoginRatio}_{d,i} + \\
+& \beta_{19} \text{(Avg. Minutes)}_i + \beta_{20} \text{(Avg. Streak)}_i + \\
+& \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{School FEs} + \epsilon_i\end{align*}
+$$
+
+for teacher $i$ with $C_i$ classes. `LoginRatio` represents the ratio of logins by teacher $i$ during each month $m$ and on each day of the week $d$ relative to other months and days, respectively. We exclude July and Sunday to prevent multicollinearity. Standard errors are clustered by school with the `vcovHC` function [@millo2017] in R.
 
 ```{r preprocessing-habits}
 #| eval: false
@@ -724,86 +757,166 @@ pUsage <- pdata.frame(
   index = c("MDR.School.ID"))
   # index = c("Adult.User.ID", "Week", "MDR.School.ID"))
 
-panel_model <- plm(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat +
+habits_fe_model <- plm(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat +
                      month_1 + month_2 + month_3 + month_4 + month_5 + month_6 +
                      month_8 + month_9 + month_10 + month_11 + month_12 +
-                     Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
-                     mean_visits + mean_time_lag,
+                     Total_Minutes_on_Zearn + mean_streak + mean_time_lag,
                    data = pUsage, model = "within")
-# panel_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
+# habits_fd_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
 #                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
 #                      mean_visits + mean_time_lag,
 #                     data = pUsage, model = "fd", objfun = "lsq",
 #                     lower = 0, sample = "cens")
 
-summary(panel_model)
+summary(habits_fe_model,vcov = vcovHC(habits_fe_model, type = "HC3", cluster = "group"))
+
+# Hausman Test supports Fixed Effects
+# habits_re_model <- plm(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat +
+#                      month_1 + month_2 + month_3 + month_4 + month_5 + month_6 +
+#                      month_8 + month_9 + month_10 + month_11 + month_12 +
+#                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
+#                      mean_visits + mean_time_lag,
+#                    data = pUsage, model = "random", effect = "individual")
+# phtest(habits_fe_model, habits_re_model)
+# 
+# data:  logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + month_1 + month_2 +  ...
+# chisq = 227.82, df = 22, p-value < 2.2e-16
+# alternative hypothesis: one model is inconsistent
 
 ```
-
--   Detailed steps in the regression analysis.
--   Explanation of fixed effects model.
--   Software and tools used in analysis.
--   Publishing Negative Data: Include any negative data that did not support hypotheses.
--   List of all statistical software and tools.
--   Versions and settings used.
--   Thorough Description of Methods: Clearly report experimental parameters.
 
 ## Study 2
 
-### Pre-registration Details
+We used the findings from Study 1 to inform the creation of two interventions as part of a larger multi-arm "mega study" that involved 15 sets of nudges.
 
--   Date created: September 14, 2021.
--   Confirmation that no data were collected prior to the study.
--   Hypotheses: H1 and H2 with detailed descriptions.
--   Dependent Variables: Primary and secondary variables with specific definitions and timeframes.
--   Conditions: Description of "Empathy" treatment and "Control Condition".
--   Analysis Plan: Description of regression analysis, control variables, handling of missing values, and adjustments for multiple comparisons.
--   Outliers and Exclusions: Specific criteria for exclusion of observations.
--   Sample Size: Number of participants and criteria for eligibility.
--   Additional Analyses: Detailed list of supplementary analyses to be conducted.
+### Implementation
 
-### Evaluation / Impact Assessment
+Study 2 was conducted in collaboration with Zearn [@zearnma] and was preregistered for the fall of 2021. To incentivize teacher participation during our "intervention period" from September 15, 2021, to October 12, 2021, all teachers on the platform received two messages on September 1 and 8, 2021. These messages informed them they had been enrolled in the "Zearn Math Giveaway" and that every email opened until October 12, 2021, would earn them tickets. These tickets were used to enter drawings for various prizes, such as autographed children's books, stickers, and gift cards.
 
--   Methods of measuring intervention impact.
--   Statistical analysis of results.
--   Detailed Reporting of Methodologies: Include comprehensive description of all methodologies used.
--   Outcome Measure
--   Specific measures used to evaluate the impact of interventions.
--   Techniques for evaluating nudge effectiveness.
--   Comprehensive Methodological Reporting: Ensure thorough reporting of all methods and experimental parameters.
+### Data
 
-## Study 2a
+We excluded Zearn elementary school teachers from the study if they (a) taught grades other than first through eighth ($n=X$), (b) lacked a valid email address in the Zearn system as of September 8, 2021 ($n=X$), (c) had less than one or more than 150 students associated with their Zearn account as of October 18, 2021 ($n=X$), (d) had fewer than one or more than six classrooms associated with their Zearn account as of DATE ($n=X$), (e) had other teachers associated with their Zearn classroom(s) as of DATE ($n=X$), or (f) had not logged onto the Zearn platform (or had no associated student who logged onto the platform) between March 1, 2021 and September 14, 2021 ($n=X$).
 
-### Intervention Design
+After exclusions, we randomized $N = 140,461$ teachers across 22,281 schools who served 2,992,077 students in 161,722 classrooms into one of the intervention conditions or the control condition ($N_{\text{control}} = 29,513$). The control condition was larger than the interventions to account for multiple comparisons. Among $n = 16,372$, or $11.66\%$, of teachers, at least one of two problems occurred in the emails sent by Zearn Math during the intervention period: an email message that was intended but not sent ($n = 13,568$, or $9.66\%$ of teachers), or an email message that was sent but not intended (i.e., from a different treatment condition; $n = 2,804$, or $2.00\%$ of teachers). As these email problems were systematically related to treatment assignment ($\chi^2 = 33.01$, $df = 15$, $p = .005$), we did not exclude these participants and conducted intent-to-treat analyses. Refer to the SI for email problem prevalence by condition and study analyses that exclude or adjust for email problems, respectively.
 
--   Steps in developing empathy-based interventions.
--   Criteria for intervention selection.
--   Nudge Engineering / Increasing Engagement Through Empathy
+### Impact Assessment
 
-### Implementation Method
+We followed our preregistered analysis plan to assess the effect of each treatment on the primary outcome of interest: math lessons completed by students during our four-week intervention period [@gallo2022a; @gallo2022b]. We estimated a weighted ordinary least squares (OLS) regression with the `areg` command in Stata [@statacorp2023]. Each teacher’s observations were weighted proportionally to the total number of students in their Zearn classroom(s).
 
--   Detailed procedure for implementing interventions.
--   Timeline and phases of implementation.
+The primary predictors were indicators for each intervention, omitting the control condition. The regression also included the following control variables: (1) school fixed effects, (2) an indicator for the teacher's account type (free or paid), (3) the number of times the teacher logged into Zearn prior to the study, from August 1 to September 14, 2021, (4) the total number of students in the teacher's classroom(s) as of October 18, 2021, (5) the number of classrooms associated with the teacher as of October 18, 2021, (6) the number of days since the teacher obtained a Zearn account prior to the study's launch, (7) the number of days separating the study's launch and the start of the teacher's school year, (8) the average number of lessons completed by a teacher's students from the start of their school year to the start of the intervention (or from July 14, 2021, if the school year start was not known), (9) whether the teacher opened our September 1, 2021 email announcing the upcoming Zearn Math Giveaway, (10) a similar indicator for our September 8, 2021, email reminding them of the giveaway, and (11) the percentage of a teacher's students in each grade except for third grade to avoid multicollinearity, since for most teachers, students were in a single grade.
 
-## Study 2b
+### Study 2a: Empathy-Based Intervention Design and Implementation
 
-### Intervention Design
+We designed four emails highlighting empathy and encouraging teacher engagement, specifically regarding pedagogical content knowledge. A group of 7,443 teachers were chosen at random to receive these emails.
 
--   Nudge Engineering / Increasing Engagement Through Habitization
+### Study 2b: Habitization-Based Intervention Design and Implementation
 
-### Implementation Method
-
--   Detailed procedure for implementing interventions.
+We designed four emails to be sent on Fridays, emphasizing the importance of regular Friday logins and student progress tracking. A total of 7,476 teachers were randomly selected to receive these emails. Additionally, we created a condition-specific control group that received messages on Wednesdays without Friday-specific content but with links to specific actions on Zearn. A group of 7,577 teachers were randomly chosen to participate in this control group.
 
 ```{stata}
 
+*********************************************************
+* Adapted from:                       							    *
+* Title: Zearn Main and Per Protocol Analyses				    *
+* Author: Ramon Silvera Zumaran		      						    *
+* Date: 13 Jul 2023										   	              *
+*********************************************************
 
+clear all
+set more off
+set type double
+* ssc install blindschemes
+set scheme plotplain
+
+*************************
+**# Defining Programs #**
+*************************
+
+* Data Transformation and BH Adjustment Program
+/* This program performs a Benjamini-Hochberg Adjustment for multiple hypothesis
+   testing and summarizes the original results alongside the adjusted p-values */
+
+cap drop bhadjustment
+
+program define bhadjustment
+	args cond_num
+	
+	matrix results = r(table)
+	local colnames : colfullnames results
+	local colnum : colsof results
+	local cond_num = `cond_num'
+	
+	gen category_num = .
+	gen category = ""
+	gen coef = .
+	gen standard_error = .
+	gen p_val = .
+	gen p_val_BH = .
+	
+	forvalues j = 1/`cond_num' {
+		levelsof condition_cat if condition == `j', local(level) clean
+		replace category_num = `j' in `j'
+		replace category = "`level'" in `j'
+		replace coef = results[1,`j'] in `j'
+		replace standard_error = results[2,`j'] in `j'
+		replace p_val = results[4,`j'] in `j'
+	}
+	
+	keep category_num-p_val
+	
+	drop if mi(category)
+	
+	sort category_num
+	drop category_num
+	
+	sort p_val
+	gen rank = _n
+
+	gen p_val_BH = p_val*(`cond_num'/rank)
+
+	forvalues i = 1/`cond_num' {
+		local num = `cond_num'+1
+		local ind = `num'-`i'
+		if p_val_BH[`ind'+1] < p_val_BH[`ind'] {
+			replace p_val_BH = p_val_BH[`ind'+1] in `ind'
+		}
+	}
+	
+	replace p_val_BH = round(p_val_BH, 0.001)
+
+	drop rank
+	
+	list
+
+end
+
+***************************************
+**# Defining globals for covariates #**
+***************************************
+/* These are our pre-registered covariates for our primary DV regressions. */
+
+* Main Analysis: Badges
+global badges_covs perc_G1 perc_G2 perc_G4 perc_G5 perc_G6 perc_G7 perc_G8 is_free teacher_badges_pre pre_intv_logins total_associated_students n_classes acct_age missing_classroom_grade opened_weekneg1 opened_week0
+
+********************************************
+**# Primary and Secondary DV Regressions #**
+********************************************
+
+* Student Math Performance
+use "Data/megastudy_clean.dta", clear
+// Pre-registered regression
+areg teacher_badges_during ib16.condition $badges_covs [aweight=total_associated_students], absorb(combined_school_id)
+// Wald test for checking whether friday and weekly treatment are postive 
+test 7.condition 8.condition
+test 8.condition-7.condition=0
+local sign_car = sign(_b[8.condition]-_b[7.condition])
+display "H_1: Wednesday >= Friday p-value = " normal(`sign_car'*sqrt(r(F)))
 
 ```
 
-### Ethical Considerations and IRB Approval
+## Ethical Considerations and IRB Approval
 
-This study was conducted in accordance with ethical standards and received approval from the Institutional Review Board (IRB) at the University of Pennsylvania. Given the nature of the data, which included de-identified and aggregated information, the IRB determined that informed consent from individual participants was not required for this research. The study's methodologies were designed to ensure the confidentiality and anonymity of all participants involved, adhering strictly to ethical guidelines for educational research.
+This study was conducted in accordance with ethical standards and received exempt status from the Institutional Review Board (IRB) at the University of Pennsylvania. The study's methodologies were designed to ensure the confidentiality and anonymity of all participants involved, adhering strictly to ethical guidelines for educational research. Data received from Zearn was aggregated at the classroom-level, with no identifying information about teachers or students.
 
 # Supplementary Information
 
@@ -836,6 +949,14 @@ $$
 where $c_n, n \in {1, 2, 3}$, is one of the components, and $z$ is a Gaussian variable with zero mean and unit variance. FastICA iteratively maximizes this value across all components, producing an orthogonal rotation matrix $R_{3 \times 3}$ such that $C = YR$.
 
 For more details on ICA and the FastICA algorithm, see [@hyvärinen2000a; @helwig2013].
+
+### Censored Panel Regression
+
+We can't really use fixed effects... [@honore1992].
+
+### Fixed-Effects Regression
+
+Hausman Test
 
 ## Supplementary Tables
 
@@ -894,6 +1015,8 @@ ica_loadings_table <- ica_loadings_df %>%
 ica_loadings_table
 
 ```
+
+-   Additional Analyses: Detailed list of supplementary analyses to be conducted.
 
 ## Supplementary Equations
 
