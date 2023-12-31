@@ -1,10 +1,22 @@
 ---
-title: "zearn_nudge"
+title: "Discovering Data-Driven Nudges to Help Students Learn More Math"
+abstract: ""
+keywords: "Pedagogical Decision-Making, Digital Education Platforms, Empirical Field Data, Instructional Adaptation"
+author:
+  - name: Marcos Gallo
+    orcid: 0000-0002-8227-2661
 format: pdf
 bibliography: references.bib
+
+execute:
+  echo: false
+  warning: false
+  error: false
 ---
 
+
 ```{r import}
+
 library(data.table)
 library(dtplyr)
 library(tidyverse)
@@ -296,6 +308,7 @@ gc(verbose = FALSE)
 <!-- SEAN: Help troubleshoot map -->
 
 ```{r}
+#| eval: false
 #| cache: true
 #| label: fig-teachers-map
 #| fig-cap: "Geographical distribution of teachers across various parishes in Louisiana, and the top 5 cities with the highest number of teachers."
@@ -540,10 +553,13 @@ summary(ica_fd_model, vcov = vcovHC(ica_fd_model, type = "HC3", cluster = "group
 We estimated a fixed effects model using the `plm` function[@croissant2008] in R:
 
 $$
+
 \begin{align*}
-\ln \left( \sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} + 1 \right) = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{LoginRatio}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{LoginRatio}_{d,i} + \\
-& \beta_{19} \text{(Avg. Minutes)}_i + \beta_{20} \text{(Avg. Streak)}_i + \\
-& \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{School FEs} + \epsilon_i\end{align*}
+\ln \left( \sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} + 1 \right) = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{LoginRatio}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{LoginRatio}_{d,i} \\
+& + \beta_{19} \text{(Avg. Minutes)}_i + \beta_{20} \text{(Avg. Streak)}_i \\
+& + \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{School FEs} + \epsilon_i
+\end{align*}
+
 $$
 
 for teacher $i$ with $C_i$ classes. `LoginRatio` represents the ratio of logins by teacher $i$ during each month $m$ and on each day of the week $d$ relative to other months and days, respectively. We exclude July and Sunday to prevent multicollinearity. Standard errors are clustered by school with the `vcovHC` function [@millo2017] in R.
@@ -924,7 +940,7 @@ This study was conducted in accordance with ethical standards and received exemp
 
 ### Independent Component Analysis (ICA)
 
-We implement the FastICA algorithm [@hyvärinen2000] to estimate independent components from our dataset. In this model, matrix $X = {x_{ij}}_{I \times J}$ , consisting of $I$ samples across $J$ random variables, is expressed as a linear mixture of independent components $C$, represented by:
+We implement the FastICA algorithm [@hyvarinen2000] to estimate independent components from our dataset. In this model, matrix $X = {x_{ij}}_{I \times J}$ , consisting of $I$ samples across $J$ random variables, is expressed as a linear mixture of independent components $C$, represented by:
 
 $$
 X = C' M + E.
@@ -948,7 +964,7 @@ $$
 
 where $c_n, n \in {1, 2, 3}$, is one of the components, and $z$ is a Gaussian variable with zero mean and unit variance. FastICA iteratively maximizes this value across all components, producing an orthogonal rotation matrix $R_{3 \times 3}$ such that $C = YR$.
 
-For more details on ICA and the FastICA algorithm, see [@hyvärinen2000a; @helwig2013].
+For more details on ICA and the FastICA algorithm, see [@hyvarinen2000; @helwig2013].
 
 ### Censored Panel Regression
 
