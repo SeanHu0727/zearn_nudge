@@ -5,6 +5,10 @@ keywords: "Pedagogical Decision-Making, Digital Education Platforms, Empirical F
 author:
   - name: Marcos Gallo
     orcid: 0000-0002-8227-2661
+  - name: Sean Hu
+  - name: Ben Manning
+  - name: Colin Camerer
+  - name: Angela Duckworth
 format: pdf
 bibliography: references.bib
 
@@ -1057,6 +1061,12 @@ test 9.condition-8.condition=0
 local sign_car = sign(_b[8.condition]-_b[7.condition])
 display "H_1: Wednesday >= Friday p-value = " normal(`sign_car'*sqrt(r(F)))
 
+// Cohen's d
+esize twosample xb if condition == 8  |  condition == 16, by(condition)
+esize twosample xb if condition == 9  |  condition == 16, by(condition)
+esize twosample xb if condition == 8  |  condition == 9, by(condition)
+
+
 ```
 
 ```{r}
@@ -1074,11 +1084,23 @@ knitr::kable(megastudy_model[c(7:9,33),1:5], digits = 4)
 
 ```
 
-As stated in our preregistration, we evaluated the impact of intervention messages on the number of math lessons completed by students during the four-week intervention period. Students in the megastudy control condition completed a regression-estimated 1.761 lessons during the 4-week intervention period. @tbl-megastudy-regression shows that our interventions increased the number of math lessons completed by students during the intervention period by a regression-estimated average of 0.0487 lessons, which is a 2.77% increase over the megastudy control condition. Specifically, the empathy treatment increased the number of lessons completed by students by 0.0721 lessons, or a 4.09% increase over the megastudy control condition (d = , p = .018). The Friday treatment increased the number of lessons completed by students by 0.0550 lessons, or a 1.81% increase over the megastudy control condition (d = , p = .068). The Friday treatment was not significantly different from the Friday-specific control (F(1,118137) = 0.85, p = .357).
+As stated in our preregistration, we evaluated the impact of intervention messages on the number of math lessons completed by students during the four-week intervention period. Students in the megastudy control condition completed a regression-estimated 1.761 lessons during the 4-week intervention period. @tbl-megastudy-regression shows that our interventions increased the number of math lessons completed by students during the intervention period by a regression-estimated average of 0.0487 lessons, which is a 2.77% increase over the megastudy control condition. Specifically, the empathy treatment increased the number of lessons completed by students by 0.0721 lessons, or a 4.09% increase over the megastudy control condition (d = 0.0188, p = .018). The Friday treatment increased the number of lessons completed by students by 0.0550 lessons, or a 1.81% increase over the megastudy control condition (d = 0.0192, p = .068). The Friday treatment was not significantly different from the Friday-specific control (F(1,118137) = 0.85, p = .357).
 
-Table S3 presents unstandardized coefficients from our primary regression analysis and unadjusted, robust SEs and CIs. Additionally, we utilized the Benjamini-Hochberg (BH) procedure to compute adjusted p-values, which help to control for false discovery rates when conducting multiple comparisons (Benjamini & Hochberg, 1995). Before adjusting for multiple hypothesis testing, all treatments exhibited significant benefits. However, only our treatment-specific control had a BH-adjusted p-value of less than 0.05. This intervention involved encouraging teachers to log in to Zearn weekly to receive updated student performance reports. Although reliable, the effect of this intervention was small, resulting in an estimated 0.0898 extra lessons completed in four weeks, or a 5.10% increase over the megastudy control (d = , p = .003). Even after applying the James-Stein shrinkage procedure to adjust for the winner's curse (i.e., the maximum of 15 estimated effects is upward biased), we estimated that this intervention still produced 0.061 extra lessons completed, or a 3.46% increase over the control condition (James & Stein, 1992).
+Table S3 presents unstandardized coefficients from our primary regression analysis and unadjusted, robust SEs and CIs. Additionally, we utilized the Benjamini-Hochberg (BH) procedure to compute adjusted p-values, which help to control for false discovery rates when conducting multiple comparisons [@benjamini1995]. Before adjusting for multiple hypothesis testing, all treatments exhibited significant benefits. However, only our treatment-specific control had a BH-adjusted p-value of less than 0.05. This intervention involved encouraging teachers to log in to Zearn weekly to receive updated student performance reports. Although reliable, the effect of this intervention was small, resulting in an estimated 0.0898 extra lessons completed in four weeks, or a 5.10% increase over the megastudy control (d = 0.0235, p = .003). Even after applying the James-Stein shrinkage procedure to adjust for the winner's curse (i.e., the maximum of 15 estimated effects is upward biased), we estimated that this intervention still produced 0.061 extra lessons completed, or a 3.46% increase over the control condition [@james1992].
 
 # Discussion
+
+This study aimed to improve student math learning on the Zearn platform by integrating data analysis into educational intervention. We identified critical teacher behaviors influencing student performance and evaluated two novel interventions: empathy and Friday habitization.
+
+Our first study revealed subtle but significant patterns in teacher engagement that traditional analyses might overlook. Study 1a identified a significant independent component strongly associated with metrics related to struggles and achievements, suggesting teachers' empathy-driven engagement, focusing on areas where students faced challenges or succeeded. This pattern also correlated with a significant increase in student achievement, aligning with findings emphasizing the importance of teacher empathy in educational outcomes [@hill2008; @battey2016]. In Study 1b, we discovered that teachers who logged into Zearn on Fridays had a notable impact on student math performance. This behavior indicated a commitment to continuous planning and support, echoing the findings of @blanchard2016 that technology integration does not need large-scale changes in practices to enhance student learning. Overall, our research highlights the importance of teacher engagement and personalized instruction and feedback in improving student performance on the Zearn platform. As @ertmer2012 have emphasized, aligning student-centered beliefs and practices is vital to success, regardless of technological, administrative, or assessment barriers.
+
+In Study 2a, the success of the empathy intervention can be attributed to its alignment with psychological principles that emphasize the importance of emotional connectivity between teachers and students. This intervention likely fostered a more engaging and supportive learning environment, a feature essential for the success of digital platforms [@lavecchia2016; @koch2015]. In contrast, Study 2b's unexpected results highlight the complexities of behavior change in educational settings, suggesting that repetitive routines without meaningful engagement or context may not enhance learning outcomes. Notably, our study-specific control outperformed all other megastudy interventions. Initial analyses from Duckworth et al. (2024) suggest that this effect is due to the higher salience of personalization present, such as the suggestion of classroom-specific actions (e.g., "CLICK HERE to see which of your students are struggling"). The lack of additional content in this control highlighted actionable steps to engage with students, an effect which, in retrospect, aligns with previous literature.
+
+Our study's insights transcend the immediate context. It showcases the potential of data-driven interventions to create strategies that cater to the unique needs of teachers and students. This approach paves the way for personalized and responsive pedagogy. In the realm of digital learning, our findings underscore the pivotal role of teacher engagement and tailored content, which are crucial for replicating and enhancing the benefits of traditional classrooms. In essence, our research provides a roadmap for designing online educational tools that are more effective and engaging.
+
+Our study, while insightful, is limited by its focus on a specific demographic and educational context within the Zearn platform. It also only partially captures teacher-student interactions in traditional classroom settings. Consequently, generalizing our results to other educational settings, cultures, or age groups may be challenging. Additionally, while our approach was more cost-effective and less time-intensive, it achieved a more modest impact than the substantial effects seen in more intensive programs [@banerjee2007; @dipietro2023]. The simplicity of our email interventions and the short duration of the study likely contributed to these results, although their magnitude aligns with other reports from educational technology applications [@cheung2013]. Future research should explore more engaging and intensive intervention methods over extended periods to potentially yield greater impacts on learning outcomes.
+
+While rooted in education data, our research introduces a paradigm with significant implications beyond its primary focus. By combining data-driven analysis with targeted behavioral interventions, our approach offers a flexible framework that can be adapted to various fields. Whether in healthcare, environmental behavior, or organizational management, our methodology demonstrates the potential to harness data insights for effective behavioral change. Hence, our study also serves as a catalyst for innovative approaches in diverse fields where behavior modification is crucial.
 
 # Materials and Methods
 
