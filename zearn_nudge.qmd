@@ -310,15 +310,31 @@ fwrite(df, "./Data/df_habits.csv")
 
 ```
 
-
-
 # Introduction
 
+The decline in math performance among American students has been a critical issue exacerbated by the COVID-19 pandemic, with some reporting an alarming half-year lag in math achievement among U.S. public school students in grades 3-8 [@fahle2023]. Learning losses and disparities, particularly among younger students, have been significant due to reduced instructional time and remote learning challenges [@zierer2021; @dipietro2023]. Moreover, @ewing2021 note that repeated school closures compounded these issues, emphasizing that the pandemic is not the only problem affecting math performance. Historical trends have also played a role, indicating a need for comprehensive solutions.
 
+Emphasizing quality math instruction is paramount for improving math performance. Teacher proficiency in pedagogical strategies, guidance, and teacher-student relations is crucial, especially for students who have lost interest in mathematics or lack a sufficient foundation [@wang2023; @battey2016]. The correlation between teachers' deep mathematical knowledge and student success highlights the importance of specialized training [@hill2008; @battey2016].
 
-Our research used a comprehensive dataset from the Zearn educational platform, covering various aspects of teacher behavior and student performance. This data was collected throughout the 2019-2020 academic year, encompassing several schools across Lousiana. Key variables included teacher logins, file downloads, and specific interactions with educational content. Additionally, we accessed student data at the classroom-week level, including metrics like lesson completion, engagement levels, and instances of learning difficulties. 
+The pandemic also accelerated the adoption of digital platforms for math education. Indeed, adaptive practice software can mitigate the impact of school closures and possibly reverse their adverse effects [@meeter2021; @alabdulaziz2021]. Recent meta-analyses demonstrate that integrating digital tools and blended learning approaches improves student outcomes significantly [@ran2021; @ran2020; @sadaf2021]. Leveraging these tools and insights gained during the pandemic should help address longstanding educational challenges [@ewing2021]. In particular, integrating technology, pedagogy, and content knowledge is essential, and professional development programs are most effective when they focus on using technology to foster a more engaging and effective learning environment [@young2016; @blanchard2016].
 
-The dataset exhibited a rich diversity in both teacher and student engagement metrics. On average, teachers logged into the platform several times per week, with notable variations in the frequency and duration of their interactions. The student performance data indicated a wide range of achievement levels, reflecting the diverse learning environments across different classrooms and schools. Standard deviations for key variables highlighted the variability in educational settings, emphasizing the heterogeneous nature of our data. @tbl-summary displays summary statistics, including median values and interquartile ranges for both teacher and student variables, further highlighting the diversity and complexity of the data.
+The rise of digital platforms has also underlined the importance of student engagement in online learning. Blending online and traditional teaching methods effectively enhances engagement and understanding [@chiang2016; @sadaf2021]. Teachers are essential in helping students develop meta-cognitive skills to enhance student engagement [@haleva2020]. Furthermore, teachers' beliefs and self-efficacy toward technology integration influence their willingness to adopt innovative teaching practices [@ertmer2012; @liljedahl2020]. This relationship between student engagement and teacher attitudes highlights the importance of providing cost-effective, high-quality solutions that can be implemented across diverse educational settings.
+
+In this study, we partner with Zearn to address these topics. This math education platform reaches approximately 25% of United States elementary schools and over a million middle-school students. Zearn's approach integrates interactive digital lessons with hands-on teaching, aligning with the Common Core State Standards and providing a comprehensive educational experience [@zearnma2023].
+
+Our study leverages this rich resource to offer an innovative approach to educational interventions using behavioral science principles. Focusing on teacher quality, we align with @hanushek2020, who maintains that the efficacy of resource utilization supersedes quantity. We also follow current trends in providing cost-effective, easy-to-implement interventions that align engagement incentives [@lavecchia2016; @koch2015].
+
+Our two-step approach initially employs unsupervised learning techniques to analyze behavioral patterns in teacher activity on Zearn, aligning with the data mining value in educational research [@salazar2007; @hershcovits2020; @qiu2022; @al-shabandar2018; @shin2020]. Subsequently, we aim to establish the causality of our interventions through a large-scale field experiment guided by recommendations from @greene2022 for holistic, transparent, and reproducible research. Our unique integration of behavioral science with digital education seeks to provide impactful insights into math education and offer a blueprint for similar studies in other fields.
+
+# Results
+
+## Study 1: Data-Driven Nudge Engineering
+
+Our study used a comprehensive dataset from Zearn's educational platform, encompassing the 2019-2020 academic year and spanning multiple schools in Louisiana. Zearn's approach combines concrete, pictorial, and abstract methods for teaching mathematics, offering a personalized experience that allows teachers to track student progress effectively. Key features like the Badge system, which tracks student lesson completion, and Tower Alerts, which notifies teachers when students repeatedly struggle with a given concept, motivate students and provide valuable insights for educators.
+
+Key variables from the dataset included teacher logins, file downloads, and specific interactions with educational content. Additionally, we accessed alongside student data at the classroom-week level, encompassing metrics such as lesson completion (i.e., Badges) and instances of learning difficulties (i.e., Tower Alerts). This granularity allowed for an in-depth analysis of both teacher behaviors and student performance.
+
+The data revealed diverse engagement patterns. Teachers logged into Zearn multiple times weekly, with notable variations in interaction frequency and duration. Student data reflected a broad spectrum of performance levels across different classrooms and schools. The standard deviations of key variables underscored this diversity, as seen in @tbl-summary, which displays comprehensive summary statistics. This rich combination of teacher behaviors and student performance metrics, carefully matched with a weekly frequency for each classroom, allowed for a thorough analysis while upholding privacy standards.
 
 ```{r}
 #| label: tbl-summary
@@ -513,21 +529,6 @@ ggplot() +
                   size = 3, color = "black")
 
 ```
-
-
-
-## Data
-
-### Summary Statistics
-
--   Specific teacher and student metrics collected.
-
-
-# Results
-
-## Study 1: Data-Driven Nudge Engineering
-
-Our research explored the complex connection between teacher conduct and student success, utilizing the extensive data set available from Zearn's educational platform during the 2019-2020 academic year. This intricate combination of teacher behaviors and student performance metrics, carefully compiled with a weekly frequency for each classroom, allowed for a thorough analysis while respecting privacy concerns.
 
 ### Study 1a
 
@@ -786,6 +787,7 @@ To account for any school-specific factors that may have influenced the relation
 The regression results, as detailed in @tbl-habit-regression (see Table S2 for full results), revealed that all weekday login percentages positively affected student badges. However, Friday logins stood out significantly, supporting our hypothesis that specific days of the week have more influence on habitual engagement.
 
 <!-- SEAN: Let's try a Panel model here as well. We might need to use LASSO because we have so many variables (we also want to include interactions of weekdays with streak_dow). Panel is what we did for the previous analysis, but it was a bit more complicated with the habitization part. We can just do one mixed-effects LASSO and see if the results coincide with the analysis below and with the previous LASSO analysis. -->
+
 ```{r}
 #| label: tbl-habit-regression
 #| tbl-cap: "Regression of Log Average Badges on Habit Variables. This table displays the results of the regression model with school fixed effects. Coefficients on months and days measure the difference between the effects of login percentage relative to the July percentage (for months) and the Sunday percentage (for days). Standard errors are clustered at the school level."
@@ -1129,7 +1131,6 @@ We estimated a fixed effects model using the `plm` function[@croissant2008] in R
 & + \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{School FEs} + \epsilon_i
 \end{align*}
 ```
-
 for teacher $i$ with $C_i$ classes. `Login%` represents the percentage of logins by teacher $i$ during each month $m$ and on each day of the week $d$ relative to other months and days, respectively. We exclude July and Sunday to prevent multicollinearity. Standard errors are clustered by school with the `vcovHC` function [@millo2017] in R.
 
 ## Study 2
@@ -1213,7 +1214,6 @@ Hausman Test
 rownames(imod.fast$M) <- names(ICA_cols)
 imod.fast$M
 ```
-
 
 ```{r}
 #| label: tbl-marginal-effects
