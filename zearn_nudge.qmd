@@ -9,10 +9,7 @@ author:
   - name: Ben Manning
   - name: Colin Camerer
   - name: Angela Duckworth
-format:
-  docx:
-    toc: false
-    number-sections: false
+format: pdf
 bibliography: references.bib
 
 execute:
