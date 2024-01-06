@@ -45,14 +45,15 @@ la_usage_types <- read_csv("Data/raw/la_usage_types.csv")
 
 teacher_usage <- teacher_usage %>%
   mutate(
-    # Noting week, month, and year to summarize teacher behavior:
+    # Noting week, and year to summarize teacher behavior:
     week = lubridate::isoweek(Usage.Time),
     year = lubridate::year(Usage.Time),
     # Transforming Event.Type for "Resource Downloaded"
     Event.Type = ifelse(Event.Type == "Resource Downloaded",
                         paste0("RD.", Curriculum.Resource.Category),
                         Event.Type)
-    )
+    ) %>%
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year))
 
 # Summarize teacher behavior
 teacher_usage_total <- teacher_usage %>%
@@ -88,20 +89,27 @@ classroom_teacher_lookup <- classroom_teacher_lookup %>%
 
 # Merge teacher and student data
 # Merging with the classroom info for further merge with teacher info
-teacher_student_usage_subset <- classroom_student_usage %>%
-  inner_join(classroom_teacher_lookup %>%
-               # Filtering active teachers
-               filter(Teacher.User.ID %in% active_teachers),
-             by = "Classroom.ID") %>%
-  mutate(week = lubridate::isoweek(Usage.Week),
-         year = lubridate::year(Usage.Week)) %>%
-  full_join(teacher_usage_total %>%
-              filter(Adult.User.ID %in% active_teachers),
-             by = c("Teacher.User.ID" = "Adult.User.ID",
-                    "week", "year")) %>%
-  # Replace NAs with 0
-  mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User),
-                                         0, Badges.per.Active.User))
+classroom_student_usage <- classroom_student_usage %>%
+    inner_join(classroom_teacher_lookup %>%
+                   # Filtering active teachers
+                   filter(Teacher.User.ID %in% active_teachers) %>%
+                   select(Classroom.ID, Teacher.User.ID),
+               by = "Classroom.ID") %>%
+    mutate(week = lubridate::isoweek(Usage.Week),
+           year = lubridate::year(Usage.Week)) %>%
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year))
+
+teacher_student_usage_subset <- teacher_usage_total %>%
+  filter(Adult.User.ID %in% unique(classroom_teacher_lookup$Teacher.User.ID)) %>%
+  left_join(classroom_teacher_lookup,
+            by = c("Adult.User.ID" = "Teacher.User.ID"),
+            relationship = "many-to-many") %>%
+  full_join(classroom_student_usage,
+            by = c("Classroom.ID", "Adult.User.ID" = "Teacher.User.ID",
+                   "week", "year")) %>%
+    # Replace NAs with 0
+    mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User),
+                                           0, Badges.per.Active.User))
 
 # Process la_usage_types
 la_usage_types <- la_usage_types %>%
@@ -135,8 +143,7 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
                                    .default = NA),
          schoolAccount = case_when(schoolAccount == "No" ~ 0,
                                    schoolAccount == "Yes" ~ 1,
-                                   .default = NA),
-         month = month(Usage.Week))
+                                   .default = NA))
 
 # Filtering active teacher-classrooms
 active_classrooms <- teacher_student_usage_subset %>%
