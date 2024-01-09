@@ -7,8 +7,8 @@ author:
     orcid: 0000-0002-8227-2661
   - name: Sean Hu
   - name: Ben Manning
-  - name: Colin Camerer
   - name: Angela Duckworth
+  - name: Colin Camerer
 format: pdf
 bibliography: references.bib
 
@@ -53,7 +53,8 @@ teacher_usage <- teacher_usage %>%
                         paste0("RD.", Curriculum.Resource.Category),
                         Event.Type)
     ) %>%
-  mutate(year = ifelse(week == 1 & year == 2019, 2020, year))
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year)) %>%
+  filter(!week %in% c(23:35)) # Remove June, July, and August
 
 # Summarize teacher behavior
 teacher_usage_total <- teacher_usage %>%
@@ -97,7 +98,8 @@ classroom_student_usage <- classroom_student_usage %>%
                by = "Classroom.ID") %>%
     mutate(week = lubridate::isoweek(Usage.Week),
            year = lubridate::year(Usage.Week)) %>%
-  mutate(year = ifelse(week == 1 & year == 2019, 2020, year))
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year)) %>%
+  filter(!week %in% c(23:35)) # Remove June, July, and August
 
 teacher_student_usage_subset <- teacher_usage_total %>%
   filter(Adult.User.ID %in% unique(classroom_teacher_lookup$Teacher.User.ID)) %>%
@@ -149,22 +151,21 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
 active_classrooms <- teacher_student_usage_subset %>%
   # At least 5 students enrolled
   filter(Students...Total >= 5) %>%
-  # Do not count June/July/August
-  filter(!month %in% c(6, 7, 8),
-         # Do not count inactive weeks
-         !(is.na(Sessions.per.Active.User) & is.na(`User Session`))) %>%
+  # Do not count inactive weeks
+  filter(!(is.na(Sessions.per.Active.User) & is.na(`User Session`))) %>%
   count(Classroom.ID) %>%
-  # Remove teachers or classes active for at least 3 months
-  filter(n >= 12) %>%
+  # Remove teachers or classes inactive for at least 5 months
+  filter(n >= 20) %>%
   pull(Classroom.ID)
+
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% active_classrooms)
 
 average_student <- teacher_student_usage_subset %>%
   group_by(Classroom.ID) %>%
   summarise(Active.Users...Total = mean(Active.Users...Total)) %>%
-  # Positive number of active students per week
-  filter(Active.Users...Total > 1/3)
+  # At least 5 active students per week on average
+  filter(Active.Users...Total > 5)
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   filter(Classroom.ID %in% average_student$Classroom.ID)
 
@@ -355,23 +356,23 @@ teacher_student_usage_subset <- read.csv(file = "./Data/df.csv")
 teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
 
 # Pre-calculate unique teachers and classrooms
-unique_teachers <- unique(teacher_student_usage_subset$Teacher.User.ID)
+unique_teachers <- unique(teacher_student_usage_subset$Adult.User.ID)
 unique_classrooms <- unique(
-  teacher_student_usage_subset[, c('Teacher.User.ID', 'Classroom.ID')]
+  teacher_student_usage_subset[, c('Adult.User.ID', 'Classroom.ID')]
   )
 
 # Statistics for "# of classes"
 n_teachers <- length(unique_teachers)
 n_classes <- nrow(unique_classrooms)
 mean_classes <- n_classes / n_teachers
-classes_per_teacher <- unique_classrooms %>% count(Teacher.User.ID)
+classes_per_teacher <- unique_classrooms %>% count(Adult.User.ID)
 
 # Statistics for "# of badges"
 teacher_student_usage_subset$Total.Badges <- 
   teacher_student_usage_subset$Active.Users...Total *
   teacher_student_usage_subset$Badges.per.Active.User
 badges_per_teacher <- teacher_student_usage_subset %>% 
-  group_by(Teacher.User.ID) %>% 
+  group_by(Adult.User.ID) %>% 
   summarize(Total.Badges = sum(Total.Badges))
 
 # Statistics for "Total minutes on Zearn"
@@ -552,8 +553,9 @@ library(ica)
 
 # Perform ICA to choose number of components
 # Removing columns with zero variance
+
 ICA_cols <- teacher_student_usage_subset %>%
-  select(RD.elementary_schedule:RD.foundational_lesson_guidance) %>%
+  select(User.Session:RD.grade_level_teacher_materials) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
@@ -696,7 +698,9 @@ library(plm)
 
 # Define the columns to be used in the formula
 columns_used <- colnames(teacher_student_usage_subset %>%
-                           select(teacher_number_classes, Grade.Level, MDR.School.ID, 
+                           select(teacher_number_classes,
+                                  Grade.Level,
+                                  # MDR.School.ID,
                                   Students...Total, 
                                   # medianIncome:schoolAccount,
                                   ic1:ic3))
@@ -710,7 +714,7 @@ pUsage <- pdata.frame(
   teacher_student_usage_subset %>%
     arrange(Classroom.ID, year, week) %>%
     mutate(Classroom.ID = factor(Classroom.ID, ordered = FALSE),
-           Teacher.User.ID = factor(Teacher.User.ID, ordered = FALSE),
+           Teacher.User.ID = factor(Adult.User.ID, ordered = FALSE),
            MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
            District.Rollup.ID = factor(District.Rollup.ID, ordered = FALSE),
            Grade.Level = factor(Grade.Level, ordered = TRUE),
@@ -730,9 +734,10 @@ pUsage <- pdata.frame(
 ## SEAN: please compare:
 ## 1) RE vs FD: "There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
 ## 2) with objfun = "lad" (maybe more robust to outliers?)
-ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
-                         lower = 0, sample = "cens")
-# ica_fe_model <- censReg::censReg(fmla, data = pUsage)
+## Marcos: Move to robustness checks.
+# ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
+#                          lower = 0, sample = "cens")
+ica_fe_model <- plm(fmla, data = pUsage, model = "within")
 
 # Hausman Test supports Fixed Effects
 # ica_re_model <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
@@ -745,20 +750,20 @@ ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
 
 ```
 
-Building upon these findings, we advanced to a censored (lower bound = 0) panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. This model applied a first-difference approach with a lower bound of zero for the dependent variable. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-pldv, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fd_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fd_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
+Building upon these findings, we advanced to a censored (lower bound = 0) panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. This model applied a first-difference approach with a lower bound of zero for the dependent variable. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-pldv, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fe_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fe_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
 
 ```{r}
 #| label: tbl-pldv
 #| tbl-cap: "Regression of Log Badges on the Independent Components. This table displays the results of a censored panel regression model with a lower bound of 0 for the dependent variable. Standard errors are clustered at the teacher level."
 
-ica_fd_results <- summary(ica_fd_model,
-                      vcov = vcovHC(ica_fd_model,
+ica_fe_results <- summary(ica_fe_model,
+                      vcov = vcovHC(ica_fe_model,
                                     type = "HC3",
                                     cluster = "group")
                       )$coefficients
 
 # Convert to a gt table
-gt_table <- ica_fd_results %>%
+gt_table <- ica_fe_results %>%
   as.data.frame() %>%
   rownames_to_column("Variable") %>%
   gt() %>%
@@ -779,7 +784,7 @@ gt_table
 
 ```
 
-The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fd_model)$coefficients[-1,"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(teacher_student_usage_subset$Tower.Struggled) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
+The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(teacher_student_usage_subset$Tower.Struggled) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
 
 ### Study 1b
 
@@ -802,12 +807,12 @@ The regression results, as detailed in @tbl-habit-regression (see Table S2 for f
 ```{r habit-regression}
 
 # Read in the data
-df <- fread(file = "./Data/df_habits.csv") %>%
-  lazy_dt()
+df <- fread(file = "./Data/df_habits.csv")
 
 df_transformed <- df %>%
+  lazy_dt() %>%
   filter(Adult.User.ID %in%
-           unique(teacher_student_usage_subset$Teacher.User.ID)) %>%
+           unique(teacher_student_usage_subset$Adult.User.ID)) %>%
   mutate(dayofweek = factor(dayofweek, ordered = FALSE,
                             levels = c("Mon", "Tue", "Wed", "Thu",
                                        "Fri", "Sat", "Sun")),
@@ -816,7 +821,8 @@ df_transformed <- df %>%
   pivot_wider(names_from = dayofweek, values_from = logged, 
               values_fill = list(logged = 0)) %>%
   group_by(Adult.User.ID, Week) %>%
-  summarize(across(c(Mon:Sun), sum, na.rm = TRUE),
+  summarize(across(c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
+                   sum, na.rm = TRUE),
             Total_Minutes_on_Zearn = sum(Minutes.on.Zearn...Total, na.rm = TRUE),
             mean_streak = mean(streak, na.rm = TRUE),
             mean_streak_dow = mean(streak_dow, na.rm = TRUE),
@@ -854,14 +860,14 @@ feUsage <- pdata.frame(
     inner_join(df_monthly, by = "Adult.User.ID") %>%
     inner_join(teacher_student_usage_subset %>%
                  lazy_dt() %>%
-                 group_by(Teacher.User.ID, week, MDR.School.ID) %>%
+                 group_by(Adult.User.ID, week, MDR.School.ID) %>%
                  summarize(Badges.per.Active.User = sum(Badges.per.Active.User),
                            Year = first(year),
                            .groups = 'drop') %>%
-                 group_by(Teacher.User.ID, MDR.School.ID) %>%
+                 group_by(Adult.User.ID, MDR.School.ID) %>%
                  summarize(Badges.per.Active.User = mean(Badges.per.Active.User),
                            .groups = 'drop'),
-               by = c("Adult.User.ID" = "Teacher.User.ID")
+               by = c("Adult.User.ID")
                # by = c("Adult.User.ID" = "Teacher.User.ID",
                #        "week_label" = "week", "Year")
                ) %>%
@@ -872,9 +878,9 @@ feUsage <- pdata.frame(
   index = c("MDR.School.ID"))
   # index = c("Adult.User.ID", "Week", "MDR.School.ID"))
 
-habits_fe_model <- plm(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat +
-                     month_1 + month_2 + month_3 + month_4 + month_5 + month_6 +
-                     month_8 + month_9 + month_10 + month_11 + month_12 +
+habits_fe_model <- plm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
+                     month_1 + month_2 + month_3 + month_4 + month_5 +
+                     month_9 + month_10 + month_11 +
                      Total_Minutes_on_Zearn + mean_streak + mean_time_lag,
                    data = feUsage, model = "within")
 # habits_fd_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
@@ -926,8 +932,8 @@ gt_table <- habits_fe_results %>%
     Variable == "month_3" ~ "`%`March",
     Variable == "month_4" ~ "`%`April",
     Variable == "month_5" ~ "`%`May",
-    Variable == "month_6" ~ "`%`June",
-    Variable == "month_8" ~ "`%`August",
+    # Variable == "month_6" ~ "`%`June",
+    # Variable == "month_8" ~ "`%`August",
     Variable == "month_9" ~ "`%`September",
     Variable == "month_10" ~ "`%`October",
     Variable == "month_11" ~ "`%`November",
@@ -1314,9 +1320,9 @@ imod.fast$M
 
 t(
   100 * rbind(
-    tcrossprod(summary(ica_fd_model)$coefficients[-1,"Estimate"],
+    tcrossprod(summary(ica_fe_model)$coefficients[-1,"Estimate"],
                imod.fast$M[,1:3]),
-    tcrossprod(summary(ica_fd_model)$coefficients[-1,"Estimate"],
+    tcrossprod(summary(ica_fe_model)$coefficients[-1,"Estimate"],
                imod.fast$M[,1:3]) /
       apply(teacher_student_usage_subset %>%
               select(RD.elementary_schedule:RD.foundational_lesson_guidance) %>%
