@@ -116,16 +116,17 @@ teacher_student_usage_subset <- teacher_usage_total %>%
 # Process la_usage_types
 la_usage_types <- la_usage_types %>%
   mutate(
-    curriculum = as.integer(`Schools and Districts Usage Type` %in%
+    curriculum = as.integer(`Schools.and.Districts.Usage.Type` %in%
                               c("20-21 Curriculum", "Core Complement"))
     )
 
 # Further data merging
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   left_join(la_usage_types %>%
-              mutate(`Schools and Districts MDR School ID` =
-                       as.integer(`Schools and Districts MDR School ID`)),
-            by = c("MDR.School.ID" = "Schools and Districts MDR School ID")) %>%
+              mutate(`Schools.and.Districts.MDR.School.ID` =
+                       as.integer(`Schools.and.Districts.MDR.School.ID`)),
+            by = c("MDR.School.ID" = "Schools.and.Districts.MDR.School.ID")) %>%
+  select(!`Schools.and.Districts.Usage.Type`) %>%
   select(!`Schools and Districts Usage Type`) %>%
   left_join(school_info %>% 
               select(MDR.School.ID, District.Rollup.ID,
@@ -555,7 +556,7 @@ library(ica)
 # Removing columns with zero variance
 
 ICA_cols <- teacher_student_usage_subset %>%
-  select(User.Session:RD.grade_level_teacher_materials) %>%
+  select(`User Session`:RD.grade_level_teacher_materials) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
@@ -569,7 +570,9 @@ elbow_plot <- ggplot(data.frame(Component = 1:10, Variance = imod.fast$vafs),
   geom_point() +
   labs(x = "Component", y = "Proportion of Variance",
        title = "Scree Plot for Determining Optimal k") +
-  theme_minimal()
+  theme_minimal() + 
+  scale_x_continuous(breaks=c(2,4,6,8,10)) +
+  scale_y_continuous(labels = scales::percent)
 
 
 # ICA via different algorithms
@@ -634,15 +637,15 @@ variable_names <- c(
   "RD.pd_course_notes" = "PD Course Notes RD",
   "RD.elementary_schedule" = "Elementary Schedule RD",
   "RD.whole_group_fluency" = "Whole Group Fluency RD",
-  "Guided.Practice.Completed" = "Guided Practice Completed",
+  "Guided Practice Completed" = "Guided Practice Completed",
   "RD.small_group_lessons" = "Small Group Lesson RD",
-  "Tower.Completed" = "Tower Completed",
-  "Fluency.Completed" = "Fluency Completed",
-  "Number.Gym.Activity.Completed" = "Number Gym Activity Completed",
+  "Tower Completed" = "Tower Completed",
+  "Fluency Completed" = "Fluency Completed",
+  "Number Gym Activity Completed" = "Number Gym Activity Completed",
   "RD.grade_level_overview" = "Grade Level Overview RD",
-  "Tower.Stage.Failed" = "Tower Stage Failed",
-  "Kindergarten.Activity.Completed" = "Kindergarten Activity Completed",
-  "Tower.Struggled" = "Tower Struggled",
+  "Tower Stage Failed" = "Tower Stage Failed",
+  "Kindergarten Activity Completed" = "Kindergarten Activity Completed",
+  "Tower Struggled" = "Tower Struggled",
   "RD.k_mission" = "Kindergarten Mission RD",
   "RD.whole_group_word_problems" = "Whole Group Word Problems RD",
   "RD.assessments" = "Assessments RD",
@@ -652,8 +655,7 @@ variable_names <- c(
   "RD.curriculum_map" = "Curriculum Map RD",
   "RD.assessments_answer_key" = "Assessments Answer Key RD",
   "RD.pd_course_guide" = "PD Course Guide RD",
-  "RD.grade_level_teacher_materials" = "Grade Level Teacher Materials RD",
-  "RD.foundational_lesson_guidance" = "Foundational Lesson Guidance RD"
+  "RD.grade_level_teacher_materials" = "Grade Level Teacher Materials RD"
 )
 rownames(ica_weights) <- variable_names[names(ICA_cols)]
 
