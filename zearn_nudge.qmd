@@ -41,7 +41,7 @@ classroom_student_usage <- read.csv("Data/raw/Classroom Student Usage - Time Ser
 classroom_info <- read.csv("Data/raw/Classroom Info 2020-10-09T1617.csv")
 classroom_teacher_lookup <- read.csv("Data/raw/Classroom-Teacher Lookup 2020-10-09T1618.csv")
 school_info <- read.csv("Data/raw/School Info 2020-10-09T1619.csv")
-la_usage_types <- read_csv("Data/raw/la_usage_types.csv")
+la_usage_types <- read.csv("Data/raw/la_usage_types.csv")
 
 teacher_usage <- teacher_usage %>%
   mutate(
@@ -51,83 +51,105 @@ teacher_usage <- teacher_usage %>%
     # Transforming Event.Type for "Resource Downloaded"
     Event.Type = ifelse(Event.Type == "Resource Downloaded",
                         paste0("RD.", Curriculum.Resource.Category),
-                        Event.Type)
-    ) %>%
-  mutate(year = ifelse(week == 1 & year == 2019, 2020, year)) %>%
-  filter(!week %in% c(23:35)) # Remove June, July, and August
+                        Event.Type)) %>%
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year))
 
-# Summarize teacher behavior
+classroom_student_usage <- classroom_student_usage %>% 
+  mutate(Minutes.per.Active.User = as.numeric(Minutes.per.Active.User))
+
+
+# Teacher activity
 teacher_usage_total <- teacher_usage %>%
+  # Summarize teacher behavior
   count(Adult.User.ID, Event.Type, week, year) %>%
   pivot_wider(names_from = Event.Type, values_from = n,
               values_fill = list(n = 0)) %>%
   full_join(teacher_usage %>%
               group_by(Adult.User.ID, week, year) %>%
-              summarize(Minutes.on.Zearn...Total = sum(Minutes.on.Zearn...Total)),
+              # Summarize teacher minutes
+              summarize(Minutes.on.Zearn...Total = sum(Minutes.on.Zearn...Total)) %>%
+              ungroup(),
             by = c("Adult.User.ID", "week", "year"))
 
-# Teacher exclusion
-active_teachers <- teacher_usage_total %>%
-  count(Adult.User.ID) %>%
-  # Remove teachers active for less than 8 weeks
-  filter(n >= 8) %>%
-  pull(Adult.User.ID)
-
-# Classroom exclusion
-classroom_teacher_lookup <- classroom_teacher_lookup %>%
-  group_by(Teacher.User.ID) %>%
-  mutate(teacher_number_classes = n()) %>%
-  ungroup() %>%
+# Classroom activity
+# Filter out classrooms
+classroom_info <- classroom_info %>%
   group_by(Classroom.ID) %>%
-  # Delete classrooms with multiple teachers
-  filter(n_distinct(Teacher.User.ID) == 1) %>%
+  # At least 5 students enrolled
+  filter(Students...Total > 5) %>%
+  # Remove classrooms with multiple schools
+  filter(n_distinct(MDR.School.ID) == 1) %>%
+  ungroup()
+# Merge with classroom information
+classroom_student_usage_total <- classroom_teacher_lookup %>%
+  inner_join(classroom_info,
+             by = "Classroom.ID",
+             relationship = "many-to-many") %>%
   ungroup() %>%
-  inner_join(classroom_info %>%
+  # Merge with classroom activity
+  inner_join(classroom_student_usage %>%
+               # # Remove empty weeks (not present in original code)
+               # filter(rowSums(select(., -c(1:2)), na.rm = TRUE) > 0) %>%
                group_by(Classroom.ID) %>%
-               # Delete classrooms with multiple schools
-               filter(n_distinct(MDR.School.ID) == 1) %>%
-               ungroup(), by = "Classroom.ID")
+               # At least 5 active students per week on average
+               filter(mean(Active.Users...Total, na.rm = T) > 5) %>%
+               ungroup() %>%
+               # Fill in NAs with 0
+               mutate(across(-c(1:2), ~ replace_na(., 0))),
+             by = "Classroom.ID", relationship = "many-to-many") %>%
+  # Use only mergeable teachers
+  inner_join(teacher_usage_total %>% count(Adult.User.ID, name = "teacher_weeks"),
+             by = c("Teacher.User.ID" = "Adult.User.ID"),
+             relationship = "many-to-many") %>%
+  mutate(week = lubridate::isoweek(Usage.Week),
+         year = lubridate::year(Usage.Week)) %>%
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year))
 
-# Merge teacher and student data
-# Merging with the classroom info for further merge with teacher info
-classroom_student_usage <- classroom_student_usage %>%
-    inner_join(classroom_teacher_lookup %>%
-                   # Filtering active teachers
-                   filter(Teacher.User.ID %in% active_teachers) %>%
-                   select(Classroom.ID, Teacher.User.ID),
-               by = "Classroom.ID") %>%
-    mutate(week = lubridate::isoweek(Usage.Week),
-           year = lubridate::year(Usage.Week)) %>%
-  mutate(year = ifelse(week == 1 & year == 2019, 2020, year)) %>%
-  filter(!week %in% c(23:35)) # Remove June, July, and August
+# Merging and Filtering active teacher-classrooms
+teacher_student_usage_subset <- classroom_teacher_lookup %>%
+  # Merge with Teacher activity
+  inner_join(teacher_usage_total,
+             by = c("Teacher.User.ID" = "Adult.User.ID"),
+             relationship = "many-to-many") %>%
+  # Merge with classroom information
+  inner_join(classroom_info %>% select(Classroom.ID, MDR.School.ID),
+             by = "Classroom.ID", relationship = "many-to-many") %>%
+  # Notice inner_join: we only match weeks for which both teachers and 
+  # classrooms have data, making it fit for fixed effects
+  inner_join(classroom_student_usage_total,
+             by = c("Classroom.ID", "Teacher.User.ID", "MDR.School.ID",
+                    "week", "year"),
+             relationship = "many-to-many") %>%
+  group_by(Classroom.ID) %>%
+  # Remove teachers or classes inactive for at least 5 months
+  filter(n() > 20) %>%
+  # Remove June, July, and August
+  filter(!week %in% c(23:35)) %>%
+  # Calculate the number of classes per teacher
+  ungroup() %>% group_by(Teacher.User.ID) %>%
+  mutate(teacher_number_classes = n_distinct(Classroom.ID)) %>%
+  ungroup() %>% group_by(Classroom.ID) %>%
+  # Remove duplicate (classroom, week) pairs
+  mutate(unique_id = paste(Classroom.ID, Usage.Week)) %>%
+  # Remove those most likely to be "supervisors"
+  arrange(teacher_number_classes, -teacher_weeks) %>%
+  filter(!duplicated(unique_id)) %>% select(-unique_id) %>%
+  ungroup() %>% group_by(Teacher.User.ID) %>%
+  # Adjust the number of weeks for each teacher
+  mutate(week = week - lubridate::isoweek(min(Usage.Week)) + 1) %>%
+  mutate(week = ifelse(week < 1 | year == 2020,
+                       week + 52 * (2020 - min(year)),
+                       week)) %>%
+  ungroup() %>% arrange(Classroom.ID, Teacher.User.ID, Usage.Week)
 
-teacher_student_usage_subset <- teacher_usage_total %>%
-  filter(Adult.User.ID %in% unique(classroom_teacher_lookup$Teacher.User.ID)) %>%
-  left_join(classroom_teacher_lookup,
-            by = c("Adult.User.ID" = "Teacher.User.ID"),
-            relationship = "many-to-many") %>%
-  full_join(classroom_student_usage,
-            by = c("Classroom.ID", "Adult.User.ID" = "Teacher.User.ID",
-                   "week", "year")) %>%
-    # Replace NAs with 0
-    mutate(Badges.per.Active.User = ifelse(is.na(Badges.per.Active.User),
-                                           0, Badges.per.Active.User))
 
-# Process la_usage_types
-la_usage_types <- la_usage_types %>%
-  mutate(
-    curriculum = as.integer(`Schools.and.Districts.Usage.Type` %in%
-                              c("20-21 Curriculum", "Core Complement"))
-    )
-
-# Further data merging
+# Merge with school types
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  left_join(la_usage_types %>%
-              mutate(`Schools.and.Districts.MDR.School.ID` =
-                       as.integer(`Schools.and.Districts.MDR.School.ID`)),
-            by = c("MDR.School.ID" = "Schools.and.Districts.MDR.School.ID")) %>%
-  select(!`Schools.and.Districts.Usage.Type`) %>%
-  select(!`Schools and Districts Usage Type`) %>%
+  left_join(la_usage_types %>% mutate(
+    curriculum = as.integer(`Schools.and.Districts.Usage.Type` %in%
+                              c("20-21 Curriculum", "Core Complement")),
+    MDR.School.ID = as.integer(`Schools.and.Districts.MDR.School.ID`)) %>%
+      select(MDR.School.ID, curriculum), by = c("MDR.School.ID")) %>%
   left_join(school_info %>% 
               select(MDR.School.ID, District.Rollup.ID,
                      Demographics...Zipcode.Median.Income,
@@ -146,40 +168,9 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
                                    .default = NA),
          schoolAccount = case_when(schoolAccount == "No" ~ 0,
                                    schoolAccount == "Yes" ~ 1,
-                                   .default = NA))
+                                   .default = NA)) %>%
+  rename(Adult.User.ID = Teacher.User.ID)
 
-# Filtering active teacher-classrooms
-active_classrooms <- teacher_student_usage_subset %>%
-  # At least 5 students enrolled
-  filter(Students...Total >= 5) %>%
-  # Do not count inactive weeks
-  filter(!(is.na(Sessions.per.Active.User) & is.na(`User Session`))) %>%
-  count(Classroom.ID) %>%
-  # Remove teachers or classes inactive for at least 5 months
-  filter(n >= 20) %>%
-  pull(Classroom.ID)
-
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  filter(Classroom.ID %in% active_classrooms)
-
-average_student <- teacher_student_usage_subset %>%
-  group_by(Classroom.ID) %>%
-  summarise(Active.Users...Total = mean(Active.Users...Total)) %>%
-  # At least 5 active students per week on average
-  filter(Active.Users...Total > 5)
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  filter(Classroom.ID %in% average_student$Classroom.ID)
-
-teacher_student_usage_subset <- teacher_student_usage_subset %>%
-  # Do not include inactive weeks
-  filter(!(is.na(Sessions.per.Active.User) & is.na(`User Session`))) %>%
-  mutate(
-    District.Rollup.ID = as.character(District.Rollup.ID),
-    curriculum = as.character(curriculum),
-    Minutes.per.Active.User = as.numeric(Minutes.per.Active.User)
-    ) %>%
-  # Fill all NAs with 0 (except `curriculum`)
-  mutate(across(where(is.numeric), ~ replace_na(., 0)))
 
 # Write to csv
 write.csv(teacher_student_usage_subset, "./Data/df.csv")
@@ -351,7 +342,7 @@ The data revealed diverse engagement patterns. Teachers logged into Zearn multip
 
 ```{r}
 #| label: tbl-summary
-#| tbl-cap: "Pre-experimental Intervention Data. This table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
+#| tbl-cap: "Study 1 Data. This table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
 
 teacher_student_usage_subset <- read.csv(file = "./Data/df.csv")
 teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
@@ -421,7 +412,7 @@ gt_table <- tibble(
     `2nd Quartile` = "Median",
     `3rd Quartile` = "3rd \n Quartile"
   ) %>% 
-  fmt_markdown(columns = TRUE, rows = TRUE) %>%
+  fmt_markdown(columns = everything(), rows = TRUE) %>%
   fmt_number(
     columns = c("N"),
     decimals = 0
@@ -556,7 +547,7 @@ library(ica)
 # Removing columns with zero variance
 
 ICA_cols <- teacher_student_usage_subset %>%
-  select(`User Session`:RD.grade_level_teacher_materials) %>%
+  select(User.Session:RD.grade_level_teacher_materials) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
@@ -568,8 +559,8 @@ elbow_plot <- ggplot(data.frame(Component = 1:10, Variance = imod.fast$vafs),
                      aes(x = Component, y = Variance)) +
   geom_line(color = "gray") +
   geom_point() +
-  labs(x = "Component", y = "Proportion of Variance",
-       title = "Scree Plot for Determining Optimal k") +
+  labs(x = "Component", y = "Proportion of Variance Explained",
+       title = "Elbow Plot for Determining Number of Components") +
   theme_minimal() + 
   scale_x_continuous(breaks=c(2,4,6,8,10)) +
   scale_y_continuous(labels = scales::percent)
@@ -612,7 +603,7 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
 
 ```{r}
 #| label: fig-scree
-#| fig-cap: "Scree Plot for Determining Optimal Number of Components. This plot displays the proportion of variance explained by each independent component (IC). The optimal number of components is indicated by the 'elbow' of the plot, where the variance explained by each additional component is minimal."
+#| fig-cap: "Elbow (Scree) Plot for Determining Optimal Number of Components. The plot displays the proportion of variance explained by each independent component (IC). The optimal number of components is indicated by the 'elbow' of the plot, where the variance explained by each additional component is minimal."
 
 elbow_plot
 
@@ -631,21 +622,22 @@ ica_weights <- imod.fast$M
 
 # Define row names
 variable_names <- c(
+  "User.Session" = "User Session",
   "RD.optional_problem_sets" = "Optional Problem Sets RD",
   "RD.student_notes_and_exit_tickets" = "Student Notes and Exit Tickets RD",
   "RD.mission_overview" = "Mission Overview RD",
   "RD.pd_course_notes" = "PD Course Notes RD",
   "RD.elementary_schedule" = "Elementary Schedule RD",
   "RD.whole_group_fluency" = "Whole Group Fluency RD",
-  "Guided Practice Completed" = "Guided Practice Completed",
+  "Guided.Practice.Completed" = "Guided Practice Completed",
   "RD.small_group_lessons" = "Small Group Lesson RD",
-  "Tower Completed" = "Tower Completed",
-  "Fluency Completed" = "Fluency Completed",
-  "Number Gym Activity Completed" = "Number Gym Activity Completed",
+  "Tower.Completed" = "Tower Completed",
+  "Fluency.Completed" = "Fluency Completed",
+  "Number.Gym.Activity.Completed" = "Number Gym Activity Completed",
   "RD.grade_level_overview" = "Grade Level Overview RD",
-  "Tower Stage Failed" = "Tower Stage Failed",
-  "Kindergarten Activity Completed" = "Kindergarten Activity Completed",
-  "Tower Struggled" = "Tower Struggled",
+  "Tower.Stage.Failed" = "Tower Stage Failed",
+  "Kindergarten.Activity.Completed" = "Kindergarten Activity Completed",
+  "Tower.Struggled" = "Tower Struggled",
   "RD.k_mission" = "Kindergarten Mission RD",
   "RD.whole_group_word_problems" = "Whole Group Word Problems RD",
   "RD.assessments" = "Assessments RD",
@@ -694,18 +686,18 @@ Further examination revealed an empathy-driven process behind this trend. In thi
 
 The second component, IC2, showed substantial weightings on variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., the entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Groups." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Guidance." This component, accounting for a smaller variance (`r round(imod.fast$vafs[3]*100, 3)`%), was harder to interpret due to its complexity and diverse activities.
 
-```{r pldv-regression}
+```{r plm-regression}
 
 library(plm)
 
 # Define the columns to be used in the formula
 columns_used <- colnames(teacher_student_usage_subset %>%
                            select(teacher_number_classes,
+                                  Students...Total,
                                   Grade.Level,
                                   # MDR.School.ID,
-                                  Students...Total, 
-                                  # medianIncome:schoolAccount,
                                   ic1:ic3))
+
 # Create the formula
 fmla_str <- sprintf("logBadges ~ %s",
                     paste(sprintf("`%s`", columns_used), collapse = " + "))
@@ -714,50 +706,56 @@ fmla <- as.formula(fmla_str)
 # Define the panel model index
 pUsage <- pdata.frame(
   teacher_student_usage_subset %>%
-    arrange(Classroom.ID, year, week) %>%
+    arrange(Classroom.ID, Adult.User.ID, year, week) %>%
     mutate(Classroom.ID = factor(Classroom.ID, ordered = FALSE),
-           Teacher.User.ID = factor(Adult.User.ID, ordered = FALSE),
-           MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
-           District.Rollup.ID = factor(District.Rollup.ID, ordered = FALSE),
+           Adult.User.ID = factor(Adult.User.ID, ordered = FALSE),
+           Usage.Week = as_date(Usage.Week),
+           # MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
+           # District.Rollup.ID = factor(District.Rollup.ID, ordered = FALSE),
            Grade.Level = factor(Grade.Level, ordered = TRUE),
-           medianIncome = factor(medianIncome, ordered = TRUE),
-           povertyLevel = factor(povertyLevel, ordered = TRUE),
-           zipcode = factor(zipcode, ordered = FALSE)) %>%
-    group_by(Teacher.User.ID) %>%
-    mutate(week = week - lubridate::isoweek(min(Usage.Week)) + 1) %>%
-    mutate(week = ifelse(week < 1 | year == 2020,
-                         week + 52 * (2020 - lubridate::year(min(Usage.Week))),
-                         week)) %>%
-    ungroup() %>%
-    mutate(logBadges = log(Badges.per.Active.User + 1)),
-  index = c("Classroom.ID", "week", "Teacher.User.ID"))
+           medianIncome = factor(medianIncome, ordered = TRUE, exclude = ""),
+           povertyLevel = factor(povertyLevel, ordered = TRUE, exclude = ""),
+           zipcode = factor(zipcode, ordered = FALSE),
+           logBadges = log(Badges.per.Active.User + 1)),
+  index = c("Classroom.ID", "Usage.Week", "Adult.User.ID"))
 
-# Create and summarize the 'within' model directly
-## SEAN: please compare:
-## 1) RE vs FD: "There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
-## 2) with objfun = "lad" (maybe more robust to outliers?)
-## Marcos: Move to robustness checks.
-# ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
-#                          lower = 0, sample = "cens")
+# 'Within' model
 ica_fe_model <- plm(fmla, data = pUsage, model = "within")
 
 # Hausman Test supports Fixed Effects
-# ica_re_model <- pldv(fmla, data = pUsage, model = "random", objfun = "lsq",
-#                      lower = 0, sample = "cens")
-# phtest(ica_fd_model, ica_re_model)
+ica_re_model <- plm(fmla, data = pUsage, model = "random")
+# phtest(ica_fe_model, ica_re_model)
 # 
 # data:  fmla
-# chisq = 385.17, df = 3, p-value < 2.2e-16
+# chisq = 176.92, df = 4, p-value < 2.2e-16
 # alternative hypothesis: one model is inconsistent
+
+
+# Subsample model
+pUsage <- pUsage %>% filter(schoolAccount == 1, curriculum == 1)
+
+subsample_model <- colnames(teacher_student_usage_subset %>%
+                           select(teacher_number_classes,
+                                  Students...Total,
+                                  Grade.Level,
+                                  medianIncome,
+                                  # MDR.School.ID,
+                                  ic1:ic3))
+fmla_str <- sprintf("logBadges ~ %s",
+                    paste(sprintf("`%s`", subsample_model), collapse = " + "))
+fmla <- as.formula(fmla_str)
+
+ica_fe_subsample <- plm(fmla, data = pUsage, model = "within")
 
 ```
 
-Building upon these findings, we advanced to a censored (lower bound = 0) panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. This model applied a first-difference approach with a lower bound of zero for the dependent variable. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-pldv, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fe_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fe_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
+Building upon these findings, we advanced to a censored (lower bound = 0) panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. This model applied a first-difference approach with a lower bound of zero for the dependent variable. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-plm, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fe_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fe_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
 
 ```{r}
-#| label: tbl-pldv
+#| label: tbl-plm
 #| tbl-cap: "Regression of Log Badges on the Independent Components. This table displays the results of a censored panel regression model with a lower bound of 0 for the dependent variable. Standard errors are clustered at the teacher level."
 
+# MARCOS: Add "intercept"
 ica_fe_results <- summary(ica_fe_model,
                       vcov = vcovHC(ica_fe_model,
                                     type = "HC3",
@@ -786,6 +784,40 @@ gt_table
 
 ```
 
+```{r}
+#| label: tbl-plm-subsample
+#| tbl-cap: "Regression of Log Badges on the Independent Components. This table displays the results of a censored panel regression model with a lower bound of 0 for the dependent variable. Standard errors are clustered at the teacher level."
+
+# MARCOS: Add "intercept"
+ica_fe_subsample_results <- summary(ica_fe_subsample,
+                      vcov = vcovHC(ica_fe_subsample,
+                                    type = "HC3",
+                                    cluster = "group")
+                      )$coefficients
+
+# Convert to a gt table
+gt_table <- ica_fe_subsample_results %>%
+  as.data.frame() %>%
+  rownames_to_column("Variable") %>%
+  gt() %>%
+  cols_label(
+    Variable = "Variable",
+    Estimate = "Coefficient",
+    `Std. Error` = "Std. Error",
+    `t-value` = "t value",
+    `Pr(>|t|)` = "P Value"
+  ) %>%
+  fmt_number(
+    columns = c(Estimate, `Std. Error`, `t-value`, `Pr(>|t|)`),
+    decimals = 4
+  )
+
+# Print the table
+gt_table
+
+```
+
+
 The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(teacher_student_usage_subset$Tower.Struggled) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
 
 ### Study 1b
@@ -803,8 +835,6 @@ Prompted by @buyalskaya2023, we sought to uncover the subtleties of habitual beh
 To account for any school-specific factors that may have influenced the relationship between teacher behavior and student achievement, we estimated a school-fixed-effects regression model. Unlike study 1, this regression did not follow each teacher or class across weeks, as our unit of analysis was a teacher summed across classrooms and averaged across all weeks.
 
 The regression results, as detailed in @tbl-habit-regression (see Table S2 for full results), revealed that all weekday login percentages positively affected student badges. However, Friday logins stood out significantly, supporting our hypothesis that specific days of the week have more influence on habitual engagement.
-
-<!-- SEAN: Let's try a Panel model here as well. We might need to use LASSO because we have so many variables (we also want to include interactions of weekdays with streak_dow). Panel is what we did for the previous analysis, but it was a bit more complicated with the habitization part. We can just do one mixed-effects LASSO and see if the results coincide with the analysis below and with the previous LASSO analysis. -->
 
 ```{r habit-regression}
 
@@ -885,6 +915,12 @@ habits_fe_model <- plm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sa
                      month_9 + month_10 + month_11 +
                      Total_Minutes_on_Zearn + mean_streak + mean_time_lag,
                    data = feUsage, model = "within")
+# lm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
+#                      month_1 + month_2 + month_3 + month_4 + month_5 +
+#                      month_9 + month_10 + month_11 +
+#                      Total_Minutes_on_Zearn + mean_streak + mean_time_lag +
+#                      mean_streak_dow + total_visits +
+#                      factor(MDR.School.ID), data = feUsage)
 # habits_fd_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
 #                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
 #                      mean_visits + mean_time_lag,
@@ -1202,12 +1238,12 @@ We defined the inclusion criteria for classrooms strictly as such:
 
 We extracted all teacher behavioral variables from the dataset that displayed non-zero variance and standardized them to have a zero mean and unit variance. To determine the ideal number of independent components, we performed ICA using a range of components from 1 to 10. Our decision on the optimal number was informed by recognizing the 'elbow' on the scree plot generated from the results, yielding three independent components. We used the `icafast` function from the R `ica` package for all ICAs conducted [@helwig2022].
 
-### Censored Panel Regression
+### Panel Regression
 
 We estimated a censored panel regression model using a first difference approach, with the `pldv` function from the `plm` package [@croissant2008] in R and a lower bound of 0 for the dependent variable:
 
 $$
-\Delta \ln (\text{Badges}_{itc} + 1) = \beta_0 + \beta_1 \Delta \text{(IC1)}_{it} + \beta_2 \Delta \text{(IC2)}_{it} + \beta_3 \Delta \text{(IC3)}_{it} + \Delta \epsilon_{itc}
+\ln (\text{Badges}_{itc} + 1) = \beta_1 \text{IC1}_{it} + \beta_2 \text{IC2}_{it} + \beta_3 \text{IC3}_{it} + \epsilon_{itc}
 $$
 
 where $i, c, t$ index the teacher, class, and week, respectively. Standard errors were clustered at the teacher level with the `vcovHC` function [@millo2017] in R.
@@ -1299,7 +1335,15 @@ For more details on ICA and the FastICA algorithm, see @hyvarinen2000 and @helwi
 
 ### Censored Panel Regression
 
-We can't really use fixed effects because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood [@honore1992].
+We estimated a censored panel regression model using a first difference approach, with the `pldv` function from the `plm` package [@croissant2008] in R and a lower bound of 0 for the dependent variable:
+
+$$
+\Delta \ln (\text{Badges}_{itc} + 1) = \beta_0 + \beta_1 \Delta \text{(IC1)}_{it} + \beta_2 \Delta \text{(IC2)}_{it} + \beta_3 \Delta \text{(IC3)}_{it} + \Delta \epsilon_{itc}
+$$
+
+where $i, c, t$ index the teacher, class, and week, respectively. Standard errors were clustered at the teacher level with the `vcovHC` function [@millo2017] in R.
+
+We cannot use fixed effects because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood [@honore1992].
 
 ### Fixed-Effects Regression
 
@@ -1397,6 +1441,19 @@ ica_loadings_table <- ica_loadings_df %>%
 ica_loadings_table
 
 ```
+
+```{r}
+
+## SEAN: please compare:
+## 1) RE vs FD: "There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
+## 2) with objfun = "lad" (maybe more robust to outliers?)
+## Marcos: Move to robustness checks.
+# ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
+#                          lower = 0, sample = "cens")
+
+```
+
+<!-- SEAN: Let's try a Panel model for Study 2 as well. We might need to use LASSO because we have so many variables (we also want to include interactions of weekdays with streak_dow). Panel is what we did for the previous analysis, but it was a bit more complicated with the habitization part. We can just do one mixed-effects LASSO and see if the results coincide with the analysis below and with the previous LASSO analysis. -->
 
 -   Additional Analyses: Detailed list of supplementary analyses to be conducted.
 
