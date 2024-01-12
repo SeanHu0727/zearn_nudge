@@ -547,7 +547,7 @@ library(ica)
 # Removing columns with zero variance
 
 ICA_cols <- teacher_student_usage_subset %>%
-  select(User.Session:RD.grade_level_teacher_materials) %>%
+  select(`User Session`:RD.grade_level_teacher_materials) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
