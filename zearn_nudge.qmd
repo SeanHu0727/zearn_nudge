@@ -26,6 +26,7 @@ library(tidyverse)
 # library(zoo)
 library(ggrepel)
 library(gt)
+library(caret)
 library(Statamarkdown)
 set.seed(794563797)
 # Timestamp: 2023-12-21 21:42:25 UTC
@@ -309,8 +310,108 @@ df[time == 1, time_lag:=0, by = Adult.User.ID]
 # Cleanup: Remove temporary columns
 df[, c("first_time", "last_time", "first_week", "first_year") := NULL]
 setorder(df, Adult.User.ID, Date)
+
+# Merge with classroom data
+df_habits <- df %>%
+  lazy_dt() %>%
+  filter(Adult.User.ID %in%
+           unique(classroom_student_usage_total$Teacher.User.ID)) %>%
+  mutate(dayofweek = factor(dayofweek, ordered = FALSE,
+                            levels = c("Mon", "Tue", "Wed", "Thu",
+                                       "Fri", "Sat", "Sun")),
+         Month = factor(Month, ordered = FALSE),
+         week_label = isoweek(Date)) %>%
+  pivot_wider(names_from = dayofweek, values_from = logged, 
+              values_fill = list(logged = 0)) %>%
+  group_by(Adult.User.ID, Week) %>%
+  summarize(across(c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
+                   sum, na.rm = TRUE),
+            Total_Minutes_on_Zearn = sum(Minutes.on.Zearn...Total, na.rm = TRUE),
+            mean_streak = mean(streak, na.rm = TRUE),
+            mean_streak_dow = mean(streak_dow, na.rm = TRUE),
+            mean_visits = mean(mean_visits, na.rm = TRUE),
+            total_visits = mean(total_visits, na.rm = TRUE),
+            mean_time_lag = mean(time_lag, na.rm = TRUE),
+            Month = first(Month),
+            Year = first(Year),
+            week_label = first(week_label),
+            .groups = 'drop')
+
+# Pivot longer to aggregate by month
+df_monthly <- df_habits %>%
+  pivot_longer(cols = Mon:Sun, names_to = "dayofweek", values_to = "logged") %>%
+  group_by(Adult.User.ID, Month) %>%
+  summarize(total_logged_per_month = as.double(sum(logged, na.rm = TRUE))) %>%
+  # Pivot wider to create a column for each month
+  pivot_wider(names_from = Month, values_from = total_logged_per_month,
+              names_prefix = "month_",
+              values_fill = list(total_logged_per_month = 0)) %>%
+  mutate(row_total = rowSums(select(., starts_with("month_")))) %>%
+  mutate(across(starts_with("month_"), ~ ./row_total)) %>%
+  # mutate(across(starts_with("month_"), ~ ./row_total * 100)) %>%
+  select(-row_total)
+
+df_habits <- df_habits %>%
+  group_by(Adult.User.ID) %>%
+  summarize(across(c(Mon:Sun), sum, na.rm = TRUE),
+            across(c(Total_Minutes_on_Zearn:mean_time_lag), mean, na.rm = TRUE),
+            total_weeks = n_distinct(Week),
+            .groups = 'drop') %>%
+  mutate(row_total = rowSums(select(., c(Mon:Sun)))) %>%
+  mutate(across(c(Mon:Sun), ~ ./row_total)) %>%
+  # mutate(across(c(Mon:Sun), ~ ./row_total * 100)) %>%
+  select(-row_total) %>%
+  inner_join(df_monthly, by = "Adult.User.ID") %>%
+  inner_join(classroom_teacher_lookup %>%
+               inner_join(classroom_info, by = "Classroom.ID",
+                           relationship = "many-to-many") %>%
+               # Merge with classroom activity
+               inner_join(classroom_student_usage, by = "Classroom.ID",
+                          relationship = "many-to-many") %>%
+               # Use only mergeable teachers
+               inner_join(teacher_usage_total %>%
+                            count(Adult.User.ID, name = "teacher_weeks"),
+                          by = c("Teacher.User.ID" = "Adult.User.ID"),
+                          relationship = "many-to-many") %>%
+               mutate(week = lubridate::isoweek(Usage.Week),
+                      year = lubridate::year(Usage.Week)) %>%
+               mutate(year = ifelse(week == 1 & year == 2019, 2020, year)) %>%
+               group_by(Teacher.User.ID, week, year, MDR.School.ID) %>%
+               summarize(Badges.per.Active.User = sum(Badges.per.Active.User,
+                                                      na.rm = T),
+                         Year = first(year),
+                         .groups = 'drop') %>%
+               group_by(Teacher.User.ID, MDR.School.ID) %>%
+               summarize(Badges.per.Active.User = mean(Badges.per.Active.User,
+                                                       na.rm = T),
+                         .groups = 'drop'),
+             by = c("Adult.User.ID" = "Teacher.User.ID")) %>%
+  as_tibble()
+
+badges <- classroom_teacher_lookup %>%
+  inner_join(classroom_info, by = "Classroom.ID",
+             relationship = "many-to-many") %>%
+  # Merge with classroom activity
+  inner_join(classroom_student_usage, by = "Classroom.ID",
+             relationship = "many-to-many") %>%
+  # Use only mergeable teachers
+  inner_join(teacher_usage_total %>% count(Adult.User.ID, name = "teacher_weeks"),
+             by = c("Teacher.User.ID" = "Adult.User.ID"),
+             relationship = "many-to-many") %>%
+  mutate(week = lubridate::isoweek(Usage.Week),
+         year = lubridate::year(Usage.Week)) %>%
+  mutate(year = ifelse(week == 1 & year == 2019, 2020, year)) %>%
+  group_by(Teacher.User.ID, week, year, MDR.School.ID) %>%
+  summarize(Badges.per.Active.User = sum(Badges.per.Active.User, na.rm = T),
+            .groups = 'drop') %>%
+  group_by(Teacher.User.ID) %>%
+  summarize(Badges.per.Active.User = mean(Badges.per.Active.User, na.rm = T),
+            .groups = 'drop')
+
 # Write to csv
-fwrite(df, "./Data/df_habits.csv")
+fwrite(df, "./Data/df_habits_long.csv")
+fwrite(badges, "./Data/df_badges.csv")
+fwrite(df_habits, "./Data/df_habits.csv")
 
 ```
 
@@ -692,11 +793,12 @@ library(plm)
 
 # Define the columns to be used in the formula
 columns_used <- colnames(teacher_student_usage_subset %>%
-                           select(teacher_number_classes,
+                           select(ic1:ic3,
+                                  teacher_number_classes,
                                   Students...Total,
-                                  Grade.Level,
+                                  Grade.Level
                                   # MDR.School.ID,
-                                  ic1:ic3))
+                                  ))
 
 # Create the formula
 fmla_str <- sprintf("logBadges ~ %s",
@@ -716,14 +818,14 @@ pUsage <- pdata.frame(
            medianIncome = factor(medianIncome, ordered = TRUE, exclude = ""),
            povertyLevel = factor(povertyLevel, ordered = TRUE, exclude = ""),
            zipcode = factor(zipcode, ordered = FALSE),
-           logBadges = log(Badges.per.Active.User + 1)),
+           logBadges = log1p(Badges.per.Active.User)),
   index = c("Classroom.ID", "Usage.Week", "Adult.User.ID"))
 
 # 'Within' model
 ica_fe_model <- plm(fmla, data = pUsage, model = "within")
 
 # Hausman Test supports Fixed Effects
-ica_re_model <- plm(fmla, data = pUsage, model = "random")
+# ica_re_model <- plm(fmla, data = pUsage, model = "random")
 # phtest(ica_fe_model, ica_re_model)
 # 
 # data:  fmla
@@ -735,12 +837,13 @@ ica_re_model <- plm(fmla, data = pUsage, model = "random")
 pUsage <- pUsage %>% filter(schoolAccount == 1, curriculum == 1)
 
 subsample_model <- colnames(teacher_student_usage_subset %>%
-                           select(teacher_number_classes,
+                           select(ic1:ic3,
+                                  teacher_number_classes,
                                   Students...Total,
                                   Grade.Level,
-                                  medianIncome,
+                                  medianIncome
                                   # MDR.School.ID,
-                                  ic1:ic3))
+                                  ))
 fmla_str <- sprintf("logBadges ~ %s",
                     paste(sprintf("`%s`", subsample_model), collapse = " + "))
 fmla <- as.formula(fmla_str)
@@ -755,68 +858,120 @@ Building upon these findings, we advanced to a censored (lower bound = 0) panel 
 #| label: tbl-plm
 #| tbl-cap: "Regression of Log Badges on the Independent Components. This table displays the results of a censored panel regression model with a lower bound of 0 for the dependent variable. Standard errors are clustered at the teacher level."
 
-# MARCOS: Add "intercept"
-ica_fe_results <- summary(ica_fe_model,
-                      vcov = vcovHC(ica_fe_model,
-                                    type = "HC3",
-                                    cluster = "group")
-                      )$coefficients
+## Graphing Helper Functions
+# Function to format coefficients and standard errors
+format_coef_se <- function(coef, stars, se) {
+  paste0(sprintf("%.3f", coef),
+         stars,
+         "\n",
+         "(",
+         sprintf("%.4f", se),
+         ")")
+}
 
-# Convert to a gt table
-gt_table <- ica_fe_results %>%
-  as.data.frame() %>%
-  rownames_to_column("Variable") %>%
-  gt() %>%
-  cols_label(
-    Variable = "Variable",
-    Estimate = "Coefficient",
-    `Std. Error` = "Std. Error",
-    `t-value` = "t value",
-    `Pr(>|t|)` = "P Value"
+# Function to add significance asterisks
+add_significance <- function(p_value) {
+  if (p_value < 0.001) {
+    return("***")
+  } else if (p_value < 0.01) {
+    return("**")
+  } else if (p_value < 0.05) {
+    return("*")
+  } else {
+    return("")
+  }
+}
+
+# Improve formatting for the Average Intercept, R-squared, and N
+format_value <- function(value, digits = 3) {
+  round(value, digits = digits)
+}
+
+
+# Extracting model summaries
+ica_fe_summary <- broom::tidy(ica_fe_model)
+ica_fe_summary[, c(3:5)] <-
+  summary(ica_fe_model,
+          vcov = vcovHC(ica_fe_model,
+                        type = "HC3"))$coef[, c(2:4)]
+ica_fe_subsample_summary <- broom::tidy(ica_fe_subsample)
+ica_fe_subsample_summary[, c(3:5)] <-
+  summary(ica_fe_subsample,
+          vcov = vcovHC(ica_fe_subsample,
+                        type = "HC3"))$coef[, c(2:4)]
+
+# Merging summaries into one data frame
+merged_summaries <- merge(
+  ica_fe_summary,
+  ica_fe_subsample_summary,
+  by = "term",
+  suffixes = c("_fe", "_fe_subsample")
+)
+
+# Apply formatting to coefficients, standard errors, and adding significance
+merged_summaries <- merged_summaries %>%
+  mutate(
+    significance_fe = sapply(p.value_fe, add_significance),
+    significance_fe_subsample = sapply(p.value_fe_subsample, add_significance),
+    coef_se_fe = format_coef_se(estimate_fe,
+                                significance_fe,
+                                std.error_fe),
+    coef_se_fe_subsample = format_coef_se(
+      estimate_fe_subsample,
+      significance_fe_subsample,
+      std.error_fe_subsample
+    )
   ) %>%
-  fmt_number(
-    columns = c(Estimate, `Std. Error`, `t-value`, `Pr(>|t|)`),
-    decimals = 4
-  )
+  select(term, coef_se_fe, coef_se_fe_subsample)
+
+# Create the gt table with improved formatting
+gt_table <- gt(merged_summaries) %>%
+  cols_label(
+    term = "",
+    coef_se_fe = "All Schools",
+    coef_se_fe_subsample = "Zearn Curriculum"
+  ) %>%
+  tab_spanner(label = "ln(Badges + 1)",
+              columns = c(coef_se_fe, coef_se_fe_subsample)) %>%
+  rows_add(
+    term = c(
+      "Average Intercept",
+      "R-squared",
+      "N (Teachers, Classes, Weeks, Total)"
+    ),
+    coef_se_fe = c(
+      format_value(mean(fixef(ica_fe_model))),
+      format_value(summary(ica_fe_model)$r.squared[1]),
+      paste(
+        format_value(n_distinct(
+          index(ica_fe_model$model)$Adult.User.ID
+        )),
+        format_value(pdim(ica_fe_model)$nT$n),
+        format_value(pdim(ica_fe_model)$nT$T),
+        format_value(pdim(ica_fe_model)$nT$N),
+        sep = ", "
+      )
+    ),
+    coef_se_fe_subsample = c(
+      format_value(mean(fixef(ica_fe_subsample))),
+      format_value(summary(ica_fe_subsample)$r.squared[1]),
+      paste(
+        format_value(n_distinct(
+          index(ica_fe_subsample$model)$Adult.User.ID
+        )),
+        format_value(pdim(ica_fe_subsample)$nT$n),
+        format_value(pdim(ica_fe_subsample)$nT$T),
+        format_value(pdim(ica_fe_subsample)$nT$N),
+        sep = ", "
+      )
+    )
+  ) %>%
+  fmt_markdown(columns = c(coef_se_fe, coef_se_fe_subsample))
 
 # Print the table
 gt_table
 
 ```
-
-```{r}
-#| label: tbl-plm-subsample
-#| tbl-cap: "Regression of Log Badges on the Independent Components. This table displays the results of a censored panel regression model with a lower bound of 0 for the dependent variable. Standard errors are clustered at the teacher level."
-
-# MARCOS: Add "intercept"
-ica_fe_subsample_results <- summary(ica_fe_subsample,
-                      vcov = vcovHC(ica_fe_subsample,
-                                    type = "HC3",
-                                    cluster = "group")
-                      )$coefficients
-
-# Convert to a gt table
-gt_table <- ica_fe_subsample_results %>%
-  as.data.frame() %>%
-  rownames_to_column("Variable") %>%
-  gt() %>%
-  cols_label(
-    Variable = "Variable",
-    Estimate = "Coefficient",
-    `Std. Error` = "Std. Error",
-    `t-value` = "t value",
-    `Pr(>|t|)` = "P Value"
-  ) %>%
-  fmt_number(
-    columns = c(Estimate, `Std. Error`, `t-value`, `Pr(>|t|)`),
-    decimals = 4
-  )
-
-# Print the table
-gt_table
-
-```
-
 
 The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(teacher_student_usage_subset$Tower.Struggled) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
 
@@ -841,86 +996,22 @@ The regression results, as detailed in @tbl-habit-regression (see Table S2 for f
 # Read in the data
 df <- fread(file = "./Data/df_habits.csv")
 
-df_transformed <- df %>%
-  lazy_dt() %>%
-  filter(Adult.User.ID %in%
-           unique(teacher_student_usage_subset$Adult.User.ID)) %>%
-  mutate(dayofweek = factor(dayofweek, ordered = FALSE,
-                            levels = c("Mon", "Tue", "Wed", "Thu",
-                                       "Fri", "Sat", "Sun")),
-         Month = factor(Month, ordered = FALSE),
-         week_label = isoweek(Date)) %>%
-  pivot_wider(names_from = dayofweek, values_from = logged, 
-              values_fill = list(logged = 0)) %>%
-  group_by(Adult.User.ID, Week) %>%
-  summarize(across(c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"),
-                   sum, na.rm = TRUE),
-            Total_Minutes_on_Zearn = sum(Minutes.on.Zearn...Total, na.rm = TRUE),
-            mean_streak = mean(streak, na.rm = TRUE),
-            mean_streak_dow = mean(streak_dow, na.rm = TRUE),
-            mean_visits = mean(mean_visits, na.rm = TRUE),
-            total_visits = mean(total_visits, na.rm = TRUE),
-            mean_time_lag = mean(time_lag, na.rm = TRUE),
-            Month = first(Month),
-            Year = first(Year),
-            week_label = first(week_label),
-            .groups = 'drop')
+df <- df %>%
+  mutate(Adult.User.ID = factor(Adult.User.ID, ordered = FALSE),
+         MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
+         logBadges = log1p(Badges.per.Active.User))
 
-# Pivot longer to aggregate by month
-df_monthly <- df_transformed %>%
-  pivot_longer(cols = Mon:Sun, names_to = "dayofweek", values_to = "logged") %>%
-  group_by(Adult.User.ID, Month) %>%
-  summarize(total_logged_per_month = as.double(sum(logged, na.rm = TRUE))) %>%
-  # Pivot wider to create a column for each month
-  pivot_wider(names_from = Month, values_from = total_logged_per_month,
-              names_prefix = "month_",
-              values_fill = list(total_logged_per_month = 0)) %>%
-  mutate(row_total = rowSums(select(., starts_with("month_")))) %>%
-  mutate(across(starts_with("month_"), ~ ./row_total * 100)) %>%
-  select(-row_total)
-
-feUsage <- pdata.frame(
-  df_transformed %>%
-    group_by(Adult.User.ID) %>%
-    summarize(across(c(Mon:Sun), sum, na.rm = TRUE),
-              across(c(Total_Minutes_on_Zearn:mean_time_lag), mean, na.rm = TRUE),
-              total_weeks = n_distinct(Week),
-              .groups = 'drop') %>%
-    mutate(row_total = rowSums(select(., c(Mon:Sun)))) %>%
-    mutate(across(c(Mon:Sun), ~ ./row_total * 100)) %>%
-    select(-row_total) %>%
-    inner_join(df_monthly, by = "Adult.User.ID") %>%
-    inner_join(teacher_student_usage_subset %>%
-                 lazy_dt() %>%
-                 group_by(Adult.User.ID, week, MDR.School.ID) %>%
-                 summarize(Badges.per.Active.User = sum(Badges.per.Active.User),
-                           Year = first(year),
-                           .groups = 'drop') %>%
-                 group_by(Adult.User.ID, MDR.School.ID) %>%
-                 summarize(Badges.per.Active.User = mean(Badges.per.Active.User),
-                           .groups = 'drop'),
-               by = c("Adult.User.ID")
-               # by = c("Adult.User.ID" = "Teacher.User.ID",
-               #        "week_label" = "week", "Year")
-               ) %>%
-    mutate(Adult.User.ID = factor(Adult.User.ID, ordered = FALSE),
-           MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
-           logBadges = log(Badges.per.Active.User + 1)) %>%
-    as_tibble(),
-  index = c("MDR.School.ID"))
-  # index = c("Adult.User.ID", "Week", "MDR.School.ID"))
-
-habits_fe_model <- plm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
+habits_fe_model <- lm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
+                        month_1 + month_2 + month_3 + month_4 + month_5 +
+                        month_9 + month_10 + month_11 +
+                        Total_Minutes_on_Zearn + mean_streak + mean_time_lag +
+                        MDR.School.ID, data = df)
+habits_fe_model <- lm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
                      month_1 + month_2 + month_3 + month_4 + month_5 +
                      month_9 + month_10 + month_11 +
-                     Total_Minutes_on_Zearn + mean_streak + mean_time_lag,
-                   data = feUsage, model = "within")
-# lm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
-#                      month_1 + month_2 + month_3 + month_4 + month_5 +
-#                      month_9 + month_10 + month_11 +
-#                      Total_Minutes_on_Zearn + mean_streak + mean_time_lag +
-#                      mean_streak_dow + total_visits +
-#                      factor(MDR.School.ID), data = feUsage)
+                     Total_Minutes_on_Zearn + mean_streak + mean_time_lag +
+                     mean_streak_dow + total_visits +
+                     MDR.School.ID, data = df)
 # habits_fd_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
 #                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
 #                      mean_visits + mean_time_lag,
@@ -1349,6 +1440,316 @@ We cannot use fixed effects because there does not exist a sufficient statistic 
 
 Hausman Test
 
+### PCS Analysis
+
+```{r PCS-regression}
+#| eval: false
+
+library(pbapply)
+library(parallel)
+library(glmnet)
+library(MLmetrics)
+library(pROC)
+
+df <- fread(file = "./Data/df_habits_long.csv") %>%
+  mutate(dayofweek = factor(dayofweek, ordered = FALSE,
+                            labels = c("Sun", "Mon", "Tue", "Wed",
+                                       "Thu", "Fri", "Sat")))
+
+# Delete users with fewer than 48 (k*8) log-ins: 8 data points per fold
+df[,n_logged:=sum(logged), Adult.User.ID]
+df_transformed <- df[n_logged>48]
+# Create folds
+df_transformed[,folds:=createFolds(logged,k=6, list = FALSE), Adult.User.ID]
+
+# DEFINE LASSO FUNCTION 
+indiv_lasso = function(lambdas = 10^seq(0,-3, by = -0.05),
+                       data, normalize = TRUE){
+## THIS FUNCTION TAKES AN INDIVIDUAL TIME SERIES DATA, SPLIT THE DATA INTO TRAIN AND TEST SET AND FIT THE LASSO MODEL TO THE TRAIN SET
+  ##-----INPUT-----
+  # lambdas       : grid of tuning parameters, default values provided
+  # data          : individual time series (include both train and test data)
+  # normalize     : whether to scale the LASSO coefficients (default is TRUE)
+  # metric        : predictability measurement to use (AUC vs PRAUC), default is AUC
+  # pre_post      : if TRUE, will include indicators for pre/post-habit interacted with reward revaluation variables
+  ##-----OUTPUT-----
+  # full_model    : full LASSO model, can be used to obtain prediction, calculate AUC in a test data
+  # best_lambda   : the best lambda obtained from cross-validation procedure
+  # best_coef     : LASSO coefficients using best_lambda
+  # auc_holdout   : AUC on the test set
+  # auc_train     : AUC on the train set
+  # holdout_y     : vector of outcome variables on the test set
+  # holdout_pred  : vector of predictions made on the test set
+  # insample_pred : vector of predictions made on the train set
+  # participant_id: ID of the corresponding individual
+  # X_full        : full matrix of covariates in the train data
+  # X_holdout     : full matrix of covariates in the test data
+  data          = data[!is.na(time_lag)]
+  pred_list     = as.list(seq_len(5))
+  model_list    = as.list(seq_len(5))
+  holdout_data  = data[folds == 6]
+  train_data    = data[folds <  6]
+  X = model.matrix(logged ~ streak + 
+                     I(streak^2) + 
+                     streak_dow + 
+                     I(streak_dow^2) +
+                     factor(Month) +
+                     factor(dayofweek) +
+                     time_lag +
+                     I(time_lag^2) +
+                     prev_week_visits +
+                     prev_min_zearn - 1, 
+                   data = data)
+  for(i in 1:5){
+    validate_data = data[folds == i]
+    X_train = X[data[folds!=i, which = TRUE],]
+    lasso = glmnet(
+      x      = X_train,
+      y      = data[folds != i]$logged,
+      alpha  = 1,
+      lambda = lambdas,
+      family = "binomial",
+      intercept = TRUE,
+      standardize = TRUE
+    )
+    X_validate = X[data[folds==i, which = TRUE],]
+    pred = predict(lasso, newx = X_validate, type = 'response')
+    auc   = sapply(c(1:length(lambdas)), function(u) 
+      PRAUC(y_true = validate_data$logged, y_pred = pred[,u]))  
+    pred_list[[i]] = auc
+    model_list[[i]] = lasso
+  }
+  X_full    = X[data[folds < 6, which = TRUE],]
+  X_holdout = X[data[folds == 6, which = TRUE],]
+  all_auc    = do.call('rbind', pred_list)
+  lambda_auc = apply(all_auc, 2, mean)
+  full_model = glmnet(
+    x      = X_full,
+    y      = train_data$logged,
+    alpha  = 1,
+    lambda = lambdas,
+    family = "binomial",
+    intercept = TRUE,
+    standardize = normalize
+  )
+  best_lambda   = lambdas[which.max(lambda_auc)]
+  best_coef     = coef(full_model, s = best_lambda)
+  insample_pred = predict(full_model,
+                          newx = X_full,
+                          s = best_lambda, type = "response")
+  pred_holdout  = predict(full_model,
+                          newx = X_holdout,
+                          s = best_lambda, type = "response")
+  auc_train     = PRAUC(y_true = train_data$logged,
+                        y_pred = c(insample_pred))
+  auc_holdout   = PRAUC(y_true = holdout_data$logged,
+                        y_pred = c(pred_holdout))  
+  return(
+    list("full_model" = full_model,
+         "best_lambda" = best_lambda,
+         "best_coef" = best_coef, 
+         "auc_holdout" = auc_holdout,
+         "auc_train" = auc_train,
+         "holdout_y" = holdout_data$logged,
+         "holdout_pred" = c(pred_holdout),
+         "insample_pred" = c(insample_pred), 
+         "participant_id" = as.character(data$Adult.User.ID[1]),
+         "X_full" = X_full,
+         "X_holdout" = X_holdout)
+  )
+}
+
+# CALCULATE INDIVIDUAL AUC SEQUENCE
+individual_auc_seq = function(model, placebo = FALSE){
+  ## THIS FUNCTION TAKES AN OUTPUT OF THE gym_indiv_lasso FUNCTION AND RETURN THE AUC SEQUENCE OF THE CORRESPONDING INDIVIDUAL
+  ##-----INPUT-----
+  # model         : object returned by the gym_indiv_lasso function
+  ##-----OUTPUT-----
+  # A sequence of AUC (2-week windows) for the corresponding individual
+  
+  data       = df_transformed[Adult.User.ID == model$participant_id]
+  data       = data[!is.na(time_lag)]
+  if(placebo == TRUE){
+    set.seed(2021)
+    data[,fake_time:=sample(time, replace = FALSE)]
+    data[,time:=fake_time]
+  }
+  max_time   = max(data$time)
+  data       = data[order(time)]
+  X_pred = model.matrix(logged ~ streak + 
+                          I(streak^2) + 
+                          streak_dow + 
+                          I(streak_dow^2) + 
+                          factor(Month) +
+                          factor(dayofweek) +
+                          time_lag +
+                          prev_week_visits +
+                          prev_min_zearn +
+                          I(time_lag^2) - 1, 
+                        data = data)
+  data       = data[,c("time", "logged")]
+  chunk_ends = seq(14, max_time, 14)
+  get_auc = function(end_time){
+    ytrue      = data[time <= end_time]$logged
+    pred       = predict(model$full_model,
+                         newx = X_pred[data[time<= end_time, which = TRUE],], 
+                         s = model$best_lambda, type = "response")
+    if(mean(ytrue) != 0){
+      roc  = roc(response = factor(ytrue, levels = c(0,1)),
+                 predictor = c(pred), plot = FALSE,
+                 quiet = TRUE)
+      return(roc$auc[1])  
+    }
+    if(mean(ytrue) == 0){
+      return(NA)
+    }
+  }
+  return(sapply(chunk_ends, get_auc))
+}
+
+auc_exp_fit = function(chunk){
+  ## THIS FUNCTION TAKES A SEQUENCE OF NUMBERS (e.g. SEQUENCE OF AUC RETURNED BY THE individual_auc_seq FUNCTION) AND FIT AN EXPONENTIAL CURVE OF THE FORM a+bexp(-ct)
+  ##-----INPUT-----
+  # chunk         : sequence of numbers
+  ##-----OUTPUT-----
+  # a,b,c         : parameters of the exponential curve 
+  # fit           : fitted values as predicted by the exponential curve
+  # Rsq           : R-squared of the fit
+  T_grid = seq(14, length(chunk)*14, 14)             
+  init   = list(a = 0.1, b = 0.01, c = 0.002)
+  fit    = NULL
+  i=1
+  while(is.null(fit) & i<500){
+    fit    = tryCatch(minpack.lm::nlsLM(chunk~a-(b/(c*T_grid)) *
+                                          (1-exp(-c*T_grid)),
+                                        start = init,
+                                        lower = c(0, 0, 0),
+                                        upper = c(Inf, Inf, Inf),
+                                        control = list(maxiter = 1000)),
+                      error = function(e) NULL)
+    init   = lapply(init, function(u) u*1.1)
+    i      = i+1
+  }
+  return(list(
+    "a" = coef(fit)[1],
+    "b" = coef(fit)[2],
+    "c" = coef(fit)[3],
+    "fit" = fit$m$fitted(),
+    "Rsq" = 1-sum(fit$m$resid()^2)/((length(chunk)-1)*var(chunk, na.rm = TRUE))
+  ))
+}
+
+
+# Run Lasso
+# Set up parallel backend
+cl <- makeCluster(detectCores() - 1) # leave one core available
+clusterExport(cl, varlist = c("indiv_lasso", "individual_auc_seq",
+                              "df_transformed", "auc_exp_fit"))
+# Load required libraries on each worker
+clusterEvalQ(cl, {
+  library(dplyr)
+  library(data.table)
+  library(caret)
+  library(glmnet)
+  library(MLmetrics)
+  library(pROC)
+  library(minpack.lm)
+})
+
+# Create list of individuals
+p_list <- as.list(unique(as.character(df_transformed$Adult.User.ID)))
+zearn_lasso <- pblapply(X = p_list, cl = cl, FUN = function(p) 
+  tryCatch(indiv_lasso(data = df_transformed[Adult.User.ID == p]),
+           error = function(e) NULL))
+lasso_true = zearn_lasso[sapply(zearn_lasso, function(x) !is.null(x))]
+
+#-----Fit AUC sequences-----:
+zearn_auc_seq = pblapply(X = lasso_true, cl = cl, FUN = function(u) 
+  tryCatch(individual_auc_seq(u), error = function(e) NULL))
+
+#-----Fit exponential curve to each AUC sequence-----:
+zearn_auc_fit = pblapply(zearn_auc_seq, cl = cl, function(p)
+  tryCatch(auc_exp_fit(p), error = function(e) NULL))
+
+stopCluster(cl)
+
+zearn_fittables = lapply(zearn_auc_fit, function(u) !is.null(u))
+zearn_fittables = zearn_auc_fit[which(unlist(zearn_fittables))]
+
+## Format into data
+p_lasso = lapply(lasso_true, function(u) as.character(u$participant_id))
+p_habitized = p_lasso[which(unlist(lapply(zearn_auc_fit, function(u)
+  !is.null(u))))]  # Participants with fittable exp. curve
+habitized_people = data.table(participant_id = unlist(p_habitized),
+                              a = unlist(lapply(zearn_fittables,
+                                                function(u) u$a)),
+                              b = unlist(lapply(zearn_fittables,
+                                                function(u) u$b)),
+                              c = unlist(lapply(zearn_fittables,
+                                                function(u) u$c)),
+                              Rsq = unlist(lapply(zearn_fittables,
+                                                  function(u) u$Rsq)))
+
+## Get time to habituation
+habitized_people[,time_max:=2/c] # Time for the g function to reaches maximum value 
+habitized_people[,Tstar95:=-log(a/(20*b))/c, participant_id]  # Time to 95% habituation
+
+#-----Analyze fit-----:
+habitized_teachers = habitized_people[a >= 0.7 & a <= 1.5 & Rsq >= 0.5]
+
+# AUC and achievement (log(Badges) ~ LASSO Scores + AUC)
+# Create an empty list to store dataframes
+df_list <- list()
+# Get all possible variable names from all elements of lasso_true
+all_vars <- unique(unlist(sapply(lasso_true, function(x) 
+  if (!is.null(x$best_coef)) rownames(as.matrix(x$best_coef)) else NULL)))
+# Create a template data frame with all variables
+template_df <- as.data.frame(matrix(NA, ncol = length(all_vars), nrow = 1))
+names(template_df) <- all_vars
+
+# Loop through each element of lasso_true
+for (i in 1:length(lasso_true)) {
+  if (is.null(lasso_true[[i]]$best_coef)) {
+    print(paste("Iteration", i, ": best_coef is NULL"))
+  } else {
+    # Extract the coefficients from the sparse matrix and transpose the dataframe
+    coef <- as.data.frame(t(as.matrix(lasso_true[[i]]$best_coef)))
+    
+    # Make a copy of the template dataframe
+    tmp <- template_df
+    
+    # Fill the corresponding coefficients
+    for (var in names(coef)) {
+      tmp[[var]] <- coef[[var]]
+    }
+    
+    # Add participant_id and auc_holdout
+    tmp$auc_holdout <- lasso_true[[i]]$auc_holdout
+    tmp$participant_id <- lasso_true[[i]]$participant_id
+    
+    # Add the dataframe to the list
+    df_list[[i]] <- tmp
+  }
+}
+# Combine all dataframes into one
+final_df <- do.call(rbind, df_list)
+final_df <- final_df %>%
+  filter(participant_id %in% habitized_teachers$participant_id) %>%
+  mutate(participant_id = as.integer(participant_id)) %>%
+  inner_join(teacher_student_usage_subset %>%
+               group_by(Adult.User.ID) %>%
+               summarise(Badges = mean(Badges.per.Active.User)),
+             by = c("participant_id" = "Adult.User.ID")) %>%
+  # Fill in the NAs
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), 0, .)))
+
+# Perform linear regression
+PCS_model <- lm(log1p(Badges) ~ ., data = final_df %>%
+                  select(-participant_id, -`(Intercept)`))
+
+```
+
+
 ## Supplementary Tables
 
 ```{r}
@@ -1447,7 +1848,6 @@ ica_loadings_table
 ## SEAN: please compare:
 ## 1) RE vs FD: "There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
 ## 2) with objfun = "lad" (maybe more robust to outliers?)
-## Marcos: Move to robustness checks.
 # ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
 #                          lower = 0, sample = "cens")
 
