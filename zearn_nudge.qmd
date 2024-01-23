@@ -642,6 +642,8 @@ Zearn offers a variety of student and teacher activities, which, in our data, ca
 
 ```{r ICA}
 
+teacher_student_usage_subset <- read_csv("./Data/df.csv")
+
 library(ica)
 
 # Perform ICA to choose number of components
@@ -652,11 +654,11 @@ ICA_cols <- teacher_student_usage_subset %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
-imod.fast <- ica(ICA_cols, nc = 10)
+imod_fast <- ica(ICA_cols, nc = 10)
 
 # Create Elbow Plot
 ## SEAN: Fix plot to show integers in x-axis and % in y-axis
-elbow_plot <- ggplot(data.frame(Component = 1:10, Variance = imod.fast$vafs),
+elbow_plot <- ggplot(data.frame(Component = 1:10, Variance = imod_fast$vafs),
                      aes(x = Component, y = Variance)) +
   geom_line(color = "gray") +
   geom_point() +
@@ -674,30 +676,30 @@ elbow_plot <- ggplot(data.frame(Component = 1:10, Variance = imod.fast$vafs),
 ## 2) https://www.cs.helsinki.fi/u/ahyvarin/code/isctest/
 ## We will choose the best method accordingly (most stable and interpretable)
 
-imod.fast <- ica(ICA_cols, nc = 3)
+imod_fast <- ica(ICA_cols, nc = 3)
 # imod.imax <- ica(ICA_cols, nc = 3, method = "imax")
 # imod.jade <- ica(ICA_cols, nc = 3, method = "jade")
 
 
 # Iterate through each principal component
-for (i in 1:ncol(imod.fast$M)) {
+for (i in 1:ncol(imod_fast$M)) {
     # Find the index of the variable with the largest absolute coefficient
-    largest_coef_index <- which.max(abs(imod.fast$M[, i]))
+    largest_coef_index <- which.max(abs(imod_fast$M[, i]))
 
     # Check if the largest coefficient is negative
-    if (imod.fast$M[largest_coef_index, i] < 0) {
+    if (imod_fast$M[largest_coef_index, i] < 0) {
         # Multiply all coefficients in this principal component by -1
-        imod.fast$M[, i] <- -1 * imod.fast$M[, i]
-        imod.fast$S[, i] <- -1 * imod.fast$S[, i]
+        imod_fast$M[, i] <- -1 * imod_fast$M[, i]
+        imod_fast$S[, i] <- -1 * imod_fast$S[, i]
     }
 }
 
 # Add ICA components to the dataset
 teacher_student_usage_subset <- teacher_student_usage_subset %>%
   mutate(
-    ic1 = imod.fast$S[, 1],
-    ic2 = imod.fast$S[, 2],
-    ic3 = imod.fast$S[, 3]
+    ic1 = imod_fast$S[, 1],
+    ic2 = imod_fast$S[, 2],
+    ic3 = imod_fast$S[, 3]
   )
 
 ```
@@ -710,7 +712,7 @@ elbow_plot
 
 ```
 
-The significant finding from the ICA was the prominence of IC1, accounting for `r round(imod.fast$vafs[1]*100, 2)`% of the variance in teacher Zearn activity, as indicated in @fig-ica-heatmap. This result is significant in nudge engineering, highlighting the need to focus interventions on elements encapsulated by IC1. Conversely, IC2 and IC3, with `r round(imod.fast$vafs[2]*100, 2)`% and `r round(imod.fast$vafs[3]*100, 2)`% variance explained, play lesser but still noteworthy roles.
+The significant finding from the ICA was the prominence of IC1, accounting for `r round(imod_fast$vafs[1]*100, 2)`% of the variance in teacher Zearn activity, as indicated in @fig-ica-heatmap. This result is significant in nudge engineering, highlighting the need to focus interventions on elements encapsulated by IC1. Conversely, IC2 and IC3, with `r round(imod_fast$vafs[2]*100, 2)`% and `r round(imod_fast$vafs[3]*100, 2)`% variance explained, play lesser but still noteworthy roles.
 
 ```{r}
 #| label: fig-ica-heatmap
@@ -719,7 +721,7 @@ The significant finding from the ICA was the prominence of IC1, accounting for `
 library(pheatmap)
 
 # Add a row for the percentage of variance explained
-ica_weights <- imod.fast$M
+ica_weights <- imod_fast$M
 
 # Define row names
 variable_names <- c(
@@ -768,9 +770,9 @@ pheatmap(ica_weights,
          fontsize_row = 10,
          fontsize_col = 12,
          labels_col = c(
-           sprintf("IC1 \n (%.1f%%)", imod.fast$vafs[1] * 100),
-           sprintf("IC2 \n (%.1f%%)", imod.fast$vafs[2] * 100),
-           sprintf("IC3 \n (%.1f%%)", imod.fast$vafs[3] * 100)
+           sprintf("IC1 \n (%.1f%%)", imod_fast$vafs[1] * 100),
+           sprintf("IC2 \n (%.1f%%)", imod_fast$vafs[2] * 100),
+           sprintf("IC3 \n (%.1f%%)", imod_fast$vafs[3] * 100)
            ),
          angle_col = 0,
          cell_fun = function(j, i, x, y, width, height) {
@@ -785,7 +787,7 @@ The activities with the highest weighting in IC1 were measures associated with T
 
 Further examination revealed an empathy-driven process behind this trend. In this context, "empathy" refers to teachers' ability to comprehend and engage with students' challenges, as demonstrated by their focused attention on areas where students struggled or succeeded. The weightings in IC1 for activities like Tower Struggles (`r round(ica_weights["Tower Struggled",1], 3)`), Fluency Completed (`r round(ica_weights["Fluency Completed",1], 3)`), Guided Practice Completed (`r round(ica_weights["Guided Practice Completed",1], 3)`), and Number Gym Activity Completed (`r round(ica_weights["Number Gym Activity Completed",1], 3)`) were significantly higher compared to other activities. This pattern underlines the empathy-driven process in teaching, where teachers' engagement with the platform is focused on understanding student challenges.
 
-The second component, IC2, showed substantial weightings on variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., the entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Groups." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Guidance." This component, accounting for a smaller variance (`r round(imod.fast$vafs[3]*100, 3)`%), was harder to interpret due to its complexity and diverse activities.
+The second component, IC2, showed substantial weightings on variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., the entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Groups." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Guidance." This component, accounting for a smaller variance (`r round(imod_fast$vafs[3]*100, 3)`%), was harder to interpret due to its complexity and diverse activities.
 
 ```{r plm-regression}
 
@@ -1072,18 +1074,19 @@ gt_table <- habits_fe_results %>%
     Variable == "mean_time_lag" ~ "Avg. Days \n Between Logins",
     TRUE ~ Variable  # Default case
     )) %>%
+  filter(!grepl("MDR.School.ID", Variable)) %>%
   gt() %>%
-  fmt_markdown(columns = TRUE, rows = TRUE) %>%
+  fmt_markdown(columns = everything(), rows = TRUE) %>%
   cols_label(
     Variable = "Variable",
     Estimate = "Coefficient",
     `Std. Error` = "Std. Error",
-    `t-value` = "t value",
+    `t value` = "t value",
     `Pr(>|t|)` = "P Value"
   ) %>%
   fmt_number(
-    columns = c(Estimate, `Std. Error`, `t-value`, `Pr(>|t|)`),
-    decimals = 4
+    columns = c(Estimate, `Std. Error`, `t value`, `Pr(>|t|)`),
+    decimals = 3
   )
 
 # Print the table
@@ -1756,8 +1759,8 @@ PCS_model <- lm(log1p(Badges) ~ ., data = final_df %>%
 #| label: tbl-ica
 #| tbl-cap: "Independent Component Analysis (ICA) Results. This table displays the weights of each teacher activity in the three independent components (ICs). Notably, these metrics pertain to teacher activity on the platform, not student actions."
 
-rownames(imod.fast$M) <- names(ICA_cols)
-imod.fast$M
+rownames(imod_fast$M) <- names(ICA_cols)
+imod_fast$M
 ```
 
 ```{r}
@@ -1768,9 +1771,9 @@ imod.fast$M
 t(
   100 * rbind(
     tcrossprod(summary(ica_fe_model)$coefficients[-1,"Estimate"],
-               imod.fast$M[,1:3]),
+               imod_fast$M[,1:3]),
     tcrossprod(summary(ica_fe_model)$coefficients[-1,"Estimate"],
-               imod.fast$M[,1:3]) /
+               imod_fast$M[,1:3]) /
       apply(teacher_student_usage_subset %>%
               select(RD.elementary_schedule:RD.foundational_lesson_guidance) %>%
               select(where(~ sd(.x, na.rm = TRUE) != 0)),
@@ -1813,10 +1816,10 @@ ICA_cols <- teacher_student_usage_subset %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
-imod.fast2 <- ica(ICA_cols, nc = 3)
+imod_fast2 <- ica(ICA_cols, nc = 3)
 
 # Variance explained
-imod.fast2
+imod_fast2
 
 # Creating a data frame for the ICA loadings
 ica_loadings_df <- as.data.frame(t(ica_result$A))
