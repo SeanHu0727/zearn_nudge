@@ -445,7 +445,7 @@ The data revealed diverse engagement patterns. Teachers logged into Zearn multip
 #| label: tbl-summary
 #| tbl-cap: "Study 1 Data. This table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
 
-teacher_student_usage_subset <- read.csv(file = "./Data/df.csv")
+teacher_student_usage_subset <- read_csv(file = "./Data/df.csv")
 teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
 
 # Pre-calculate unique teachers and classrooms
@@ -641,8 +641,6 @@ ggplot() +
 Zearn offers a variety of student and teacher activities, which, in our data, can be simplified through dimensionality reduction techniques, enhancing interpretability. We employed Independent Component Analysis (ICA) on teacher behavioral variables due to their non-Gaussian nature. This statistical approach allowed us to uncover latent variables that may have been obscured with traditional methods. These components are weighted vectors of specific teacher activities and were estimated to maximize statistical independence in the data-generating process. Our findings revealed three pivotal independent components, as indicated by the 'elbow' of @fig-scree, which represents the optimal number of components that best portray the underlying dimensions of teacher behavior. (For more details, please refer to the SI section.)
 
 ```{r ICA}
-
-teacher_student_usage_subset <- read_csv("./Data/df.csv")
 
 library(ica)
 
@@ -1097,25 +1095,25 @@ gt_table
 ```{r friday-example}
 #| eval: false
 
-mean(feUsage[,13]) *                              # Total Teacher Logins 
-  (colMeans(as.matrix(feUsage[,c(2:6)])/100) -    # Times weekday percentages
-     0.01281 * c(-1/4, -1/4, -1/4, -1/4, 1)) /    # Adjustment so Fri = 1/4
-  mean(feUsage[,15])                              # Normalized by Total Weeks
+mean(unlist(df[,13])) *                         # Total Teacher Logins 
+  (colMeans(as.matrix(df[,c(2:6)])) -           # Times weekday percentages
+     0.02481 * c(-1/4, -1/4, -1/4, -1/4, 1)) /  # Adjustment so Fri = 1/4
+  mean(unlist(df[,15]))                         # Normalized by Total Weeks
 #       Mon       Tue       Wed       Thu       Fri 
-# 0.3104233 0.3284907 0.3240100 0.3174472 0.2500070 
+# 0.3285072 0.3481013 0.3478826 0.3405730 0.2753985 
 
-mean(feUsage[,13]) *
-  (colMeans(as.matrix(feUsage[,c(2:6)])/100) +
-     0.1402 * c(-1/4, -1/4, -1/4, -1/4, 1)) /     # Adjustment so Fri = 1/2
-  mean(feUsage[,15])
+mean(unlist(df[,13])) *
+  (colMeans(as.matrix(df[,c(2:6)])) +
+     0.1176 * c(-1/4, -1/4, -1/4, -1/4, 1)) /     # Adjustment so Fri = 1/2
+  mean(unlist(df[,15]))
 #       Mon       Tue       Wed       Thu       Fri 
-# 0.2479156 0.2659830 0.2615024 0.2549396 0.5000375 
+# 0.2723426 0.2919367 0.2917181 0.2844085 0.5000568 
 
-# 0.1402 - (-0.01281) = 0.1530
+# 0.1176 - (-0.02481) = 0.1424
 
 ```
 
-In particular, our analysis indicates that shifting 10% of logins from other weekdays to Fridays, without increasing overall platform usage, could boost student lesson completion by around `r round(10 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_fe_model$coefficients[1:5] * 100, 2)`%. For the typical teacher, this means switching from one Friday login per month to two while reducing one login from another weekday during that month, resulting in an increase of `r round(15.30 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_fe_model$coefficients[1:5] * 100, 2)`% in average weekly lesson completion. This outcome underscores the importance of strategic engagement rather than just login frequency.
+In particular, our analysis indicates that shifting 10% of logins from other weekdays to Fridays, without increasing overall platform usage, could boost student lesson completion by around `r round(10 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_fe_model$coefficients[2:6], 2)`%. For the typical teacher, this means switching from one Friday login per month to two while reducing one login from another weekday during that month, resulting in an increase of `r round(14.24 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_fe_model$coefficients[2:6], 2)`% in average weekly lesson completion. This outcome underscores the importance of strategic engagement rather than just login frequency.
 
 We attribute this pronounced effect to two key factors. First, Friday logins facilitate "Reflective Catch-Up," enabling teachers to review and analyze the previous week's activities and make necessary adjustments. Second, "Foresighted Planning" occurs on Fridays as teachers proactively plan for the upcoming week, a practice less common on weekends.
 
@@ -1760,7 +1758,20 @@ PCS_model <- lm(log1p(Badges) ~ ., data = final_df %>%
 #| tbl-cap: "Independent Component Analysis (ICA) Results. This table displays the weights of each teacher activity in the three independent components (ICs). Notably, these metrics pertain to teacher activity on the platform, not student actions."
 
 rownames(imod_fast$M) <- names(ICA_cols)
-imod_fast$M
+imod_fast$M %>%
+  as.data.frame() %>%
+  rename(
+    `IC 1` = V1,
+    `IC 2` = V2,
+    `IC 3` = V3
+  ) %>%
+  arrange(-`IC 1`) %>%
+  mutate(
+    `IC 1` = round(`IC 1`, 2),
+    `IC 2` = round(`IC 2`, 2),
+    `IC 3` = round(`IC 3`, 2)
+  )
+
 ```
 
 ```{r}
@@ -1793,6 +1804,54 @@ Marginal Effects
 ## Supplementary Discussion
 
 ### Robustnes Checks
+
+
+```{r ICA-no-User-Session}
+#| label: tbl-ica-robust
+#| tbl-cap: "Independent Component Analysis (ICA) Results without including User Sessions."
+
+# Perform ICA to choose number of components
+# Removing columns with zero variance
+
+ICA_cols <- teacher_student_usage_subset %>%
+  select(`RD.elementary_schedule`:RD.grade_level_teacher_materials) %>%
+  select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
+  mutate_all(scale)
+
+imod_fast2 <- ica(ICA_cols, nc = 3)
+
+# Iterate through each principal component
+for (i in 1:ncol(imod_fast2$M)) {
+    # Find the index of the variable with the largest absolute coefficient
+    largest_coef_index <- which.max(abs(imod_fast2$M[, i]))
+
+    # Check if the largest coefficient is negative
+    if (imod_fast2$M[largest_coef_index, i] < 0) {
+        # Multiply all coefficients in this principal component by -1
+        imod_fast2$M[, i] <- -1 * imod_fast2$M[, i]
+        imod_fast2$S[, i] <- -1 * imod_fast2$S[, i]
+    }
+}
+
+rownames(imod_fast2$M) <- names(ICA_cols)
+imod_fast2$M %>%
+  as.data.frame() %>%
+  arrange(-V1) %>%
+  mutate(
+    V1 = round(V1, 2),
+    V2 = round(V2, 2),
+    V3 = round(V3, 2)
+  ) %>%
+  rename(
+    `IC 1` = V1,
+    `IC 2` = V2,
+    `IC 3` = V3
+  )
+  
+imod_fast2$vafs
+
+```
+
 
 ```{r PCA}
 #| eval: false
@@ -1845,18 +1904,6 @@ ica_loadings_table <- ica_loadings_df %>%
 ica_loadings_table
 
 ```
-
-```{r}
-
-## SEAN: please compare:
-## 1) RE vs FD: "There is no command for a fixed-effects model, because there does not exist a sufficient statistic allowing the fixed effects to be conditioned out of the likelihood.
-## 2) with objfun = "lad" (maybe more robust to outliers?)
-# ica_fd_model <- pldv(fmla, data = pUsage, model = "fd", objfun = "lsq",
-#                          lower = 0, sample = "cens")
-
-```
-
-<!-- SEAN: Let's try a Panel model for Study 2 as well. We might need to use LASSO because we have so many variables (we also want to include interactions of weekdays with streak_dow). Panel is what we did for the previous analysis, but it was a bit more complicated with the habitization part. We can just do one mixed-effects LASSO and see if the results coincide with the analysis below and with the previous LASSO analysis. -->
 
 -   Additional Analyses: Detailed list of supplementary analyses to be conducted.
 
