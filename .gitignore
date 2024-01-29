@@ -3,3 +3,6 @@
 .RData
 .Ruserdata
 .Renviron
+.DS_Store
+zearn_nudge_cache
+zearn_nudge_files
