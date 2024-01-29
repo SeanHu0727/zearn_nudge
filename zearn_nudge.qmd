@@ -9,8 +9,10 @@ author:
   - name: Ben Manning
   - name: Angela Duckworth
   - name: Colin Camerer
-format: pdf
+# format: pdf
+format: docx
 bibliography: references.bib
+df-print: paged
 
 execute:
   echo: false
@@ -439,7 +441,7 @@ Our study used a comprehensive dataset from Zearn's educational platform, encomp
 
 Key variables from the dataset included teacher logins, file downloads, and specific interactions with educational content. Additionally, we accessed alongside student data at the classroom-week level, encompassing metrics such as lesson completion (i.e., Badges) and instances of learning difficulties (i.e., Tower Alerts). This granularity allowed for an in-depth analysis of both teacher behaviors and student performance.
 
-The data revealed diverse engagement patterns. Teachers logged into Zearn multiple times weekly, with notable variations in interaction frequency and duration. Student data reflected a broad spectrum of performance levels across different classrooms and schools. The standard deviations of key variables underscored this diversity, as seen in @tbl-summary, which displays comprehensive summary statistics. This rich combination of teacher behaviors and student performance metrics, carefully matched with a weekly frequency for each classroom, allowed for a thorough analysis while upholding privacy standards.
+The data revealed diverse engagement patterns. Teachers logged into Zearn multiple times weekly, with notable variations in frequency and duration. Student data reflected a broad spectrum of performance levels across different classrooms and schools. The standard deviations of key variables underscored this diversity, as seen in @tbl-summary, which displays comprehensive summary statistics. This rich combination of teacher behaviors and student performance metrics, carefully matched with a weekly frequency for each classroom, allowed for a thorough analysis while upholding privacy standards.
 
 ```{r}
 #| label: tbl-summary
@@ -491,7 +493,7 @@ stats_minutes <- calculate_stats(minutes_per_teacher, "Total.Minutes")
 
 # Formatting the table with gt
 gt_table <- tibble(
-  Category = c("`#` of teachers", "`#` of classes", "`#` of badges", "Total minutes \n on Zearn"),
+  Category = c("No. of teachers", "No. of classes", "No. of badges", "Total minutes \n on Zearn"),
   N = c(n_teachers, stats_classes$N, stats_badges$N, stats_minutes$N),
   Mean = c(NA, stats_classes$Mean, stats_badges$Mean, stats_minutes$Mean),
   `Standard Deviation` = c(NA, stats_classes$SD, stats_badges$SD, stats_minutes$SD),
@@ -500,6 +502,7 @@ gt_table <- tibble(
   `3rd Quartile` = c(NA, stats_classes$Quantiles[3], stats_badges$Quantiles[3], stats_minutes$Quantiles[3])
 ) %>%
   gt() %>%
+  fmt_markdown() %>%
   tab_spanner(
     label = "Aggregated Statistics per Teacher",
     columns = c("Mean", "Standard Deviation", "1st Quartile", "2nd Quartile", "3rd Quartile")
@@ -513,7 +516,6 @@ gt_table <- tibble(
     `2nd Quartile` = "Median",
     `3rd Quartile` = "3rd \n Quartile"
   ) %>% 
-  fmt_markdown(columns = everything(), rows = TRUE) %>%
   fmt_number(
     columns = c("N"),
     decimals = 0
@@ -530,7 +532,8 @@ gt_table <- tibble(
   sub_missing(
     columns = c("Mean", "Standard Deviation", "1st Quartile", "2nd Quartile", "3rd Quartile"),
     missing_text = "-"
-  )
+  ) %>%
+  as_raw_html()
 
 # Display the table
 gt_table
@@ -545,100 +548,9 @@ gc(verbose = FALSE)
 
 ```
 
-<!-- SEAN: Help troubleshoot map -->
-
-```{r}
-#| eval: false
-#| cache: true
-#| label: fig-teachers-map
-#| fig-cap: "Geographical distribution of teachers across various parishes in Louisiana, and the top 5 cities with the highest number of teachers."
-
-library(sf)
-library(tidygeocoder)
-library(tigris)
-library(furrr)
-plan(strategy = "multisession", workers = availableCores())
-
-# Batch geocoding
-# Sys.setenv(GEOCODIO_API_KEY = "")
-unique_zipcodes <- unique(teacher_student_usage_subset$zipcode) %>%
-  as.list()
-address_geodata <- furrr::future_map_dfr(.x = unique_zipcodes, 
-                               ~ geo(postalcode = .x,
-                                     country = "United States",
-                                     method = 'geocodio',
-                                     full_results = TRUE,
-                                     progress_bar = FALSE)) %>%
-  select(postalcode,
-         address_components.city,
-         address_components.county,
-         lat, long) %>%
-  rename(
-    city = address_components.city,
-    county = address_components.county
-  ) %>%
-  mutate(
-    postalcode = as.integer(postalcode)
-  )
-
-# Merge the geocoding results back into the original data.table
-n_teachers <- teacher_student_usage_subset %>%
-  group_by(Classroom.ID, Teacher.User.ID, MDR.School.ID,
-           District.Rollup.ID, zipcode) %>%
-  summarize(Students...Total = mean(Students...Total), 
-            .groups = "keep") %>%
-  full_join(address_geodata, by = c("zipcode" = "postalcode"))
-
-# Get the top 5 cities by number of teachers
-# Aggregate the data to get the number of teachers in each city
-top_cities <- n_teachers %>%
-  group_by(city, county) %>%
-  summarize(
-    num_teachers = n_distinct(Teacher.User.ID),
-    lat = mean(lat, na.rm = TRUE),
-    long = mean(long, na.rm = TRUE),
-    .groups = 'drop' # Optionally, drop grouping structure from the result
-  ) %>%
-  arrange(desc(num_teachers)) %>%
-  slice_head(n = 5)
-
-# Get the Louisiana county map data
-df_map <- tigris::counties(class = "sf",
-                           state = "LA",
-                           progress_bar = FALSE) %>%
-  # sf::st_set_crs(4326) %>%
-  left_join(
-    n_teachers %>%
-      group_by(county) %>%
-      summarize(num_teachers = n_distinct(Teacher.User.ID)),
-    by = c("NAMELSAD" = "county")
-    ) %>%
-  mutate(num_teachers = ifelse(is.na(num_teachers),0,num_teachers)) %>%
-  sf::st_as_sf()
-
-ggplot() +
-  geom_sf(data = df_map, aes(fill = num_teachers)) +
-  scale_fill_continuous(name = "Number of Teachers",
-                        low = "white", high = "red", na.value = "gray90") +
-  labs(
-    title = "Number of Teachers by Parish in Louisiana"
-  ) +
-  theme_minimal() +
-  theme(
-    legend.position = "bottom",
-    panel.grid = element_blank(),
-    axis.text = element_blank(),
-    axis.title = element_blank()
-  ) +
-  geom_point(data = top_cities, aes(x = long, y = lat)) +
-  geom_text_repel(data = top_cities, aes(x = long, y = lat, label = city),
-                  size = 3, color = "black")
-
-```
-
 ### Study 1a
 
-Zearn offers a variety of student and teacher activities, which, in our data, can be simplified through dimensionality reduction techniques, enhancing interpretability. We employed Independent Component Analysis (ICA) on teacher behavioral variables due to their non-Gaussian nature. This statistical approach allowed us to uncover latent variables that may have been obscured with traditional methods. These components are weighted vectors of specific teacher activities and were estimated to maximize statistical independence in the data-generating process. Our findings revealed three pivotal independent components, as indicated by the 'elbow' of @fig-scree, which represents the optimal number of components that best portray the underlying dimensions of teacher behavior. (For more details, please refer to the SI section.)
+Zearn offers a variety of activities for students and teachers, resulting in a large number of usage variables. We chose to summarize this large set of online activities into more easily interpretable variables through a dimensionality reduction technique. We employed Independent Component Analysis (ICA) on these teacher behavioral variables, given the non-Gaussian nature of the data. This statistical approach allowed us to uncover latent variables that may have been obscured with traditional methods. The resulting components are weighted vectors of specific teacher activities and were estimated to maximize statistical independence in the data-generating process. By examining the explained of each added component, we concluded that three independent components best portray the underlying dimensions of teacher behavior. (For more details, please refer to the SI section and @fig-scree.)
 
 ```{r ICA}
 
@@ -648,7 +560,7 @@ library(ica)
 # Removing columns with zero variance
 
 ICA_cols <- teacher_student_usage_subset %>%
-  select(`User Session`:RD.grade_level_teacher_materials) %>%
+  select(`RD.elementary_schedule`:RD.grade_level_teacher_materials) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
@@ -702,14 +614,6 @@ teacher_student_usage_subset <- teacher_student_usage_subset %>%
 
 ```
 
-```{r}
-#| label: fig-scree
-#| fig-cap: "Elbow (Scree) Plot for Determining Optimal Number of Components. The plot displays the proportion of variance explained by each independent component (IC). The optimal number of components is indicated by the 'elbow' of the plot, where the variance explained by each additional component is minimal."
-
-elbow_plot
-
-```
-
 The significant finding from the ICA was the prominence of IC1, accounting for `r round(imod_fast$vafs[1]*100, 2)`% of the variance in teacher Zearn activity, as indicated in @fig-ica-heatmap. This result is significant in nudge engineering, highlighting the need to focus interventions on elements encapsulated by IC1. Conversely, IC2 and IC3, with `r round(imod_fast$vafs[2]*100, 2)`% and `r round(imod_fast$vafs[3]*100, 2)`% variance explained, play lesser but still noteworthy roles.
 
 ```{r}
@@ -753,9 +657,10 @@ variable_names <- c(
 rownames(ica_weights) <- variable_names[names(ICA_cols)]
 
 # Order rows by descending IC1
-ica_weights <- ica_weights[order(-ica_weights[, 1],
-                                 -ica_weights[, 2],
-                                 -ica_weights[, 3]), ]
+ordered <- as.data.frame(ica_weights) %>%
+  mutate(across(everything(), ~ if_else(. <= quantile(., 0.75), 0, .))) %>%
+  arrange(desc(V1), desc(V2), desc(V3))
+ica_weights <- ica_weights[rownames(ordered), ]
 
 # Create the heatmap
 pheatmap(ica_weights,
@@ -781,11 +686,11 @@ pheatmap(ica_weights,
 
 ```
 
-The activities with the highest weighting in IC1 were measures associated with Towers (Struggled, Failed, and Completed) in conjunction with other completed student activities such as Fluency, Guided Practice, and Number Gym Activity. Notably, these metrics pertain to teacher logins, not student actions, implying a direct link between teacher engagement and student performance, suggesting an educational "scaffolding" effect.
+The activities with the highest weighting in IC1 were measures associated with Towers (Struggled, Failed, and Completed) in conjunction with other completed student activities such as Fluency, Guided Practice, and Number Gym Activity. Notably, these metrics pertain to teacher logins, not student actions, implying a possible educational "scaffolding" effect, where teachers work through exercises, sometimes deliberately making mistakes, to determine how to break down each problem into smaller, more manageable steps.
 
-Further examination revealed an empathy-driven process behind this trend. In this context, "empathy" refers to teachers' ability to comprehend and engage with students' challenges, as demonstrated by their focused attention on areas where students struggled or succeeded. The weightings in IC1 for activities like Tower Struggles (`r round(ica_weights["Tower Struggled",1], 3)`), Fluency Completed (`r round(ica_weights["Fluency Completed",1], 3)`), Guided Practice Completed (`r round(ica_weights["Guided Practice Completed",1], 3)`), and Number Gym Activity Completed (`r round(ica_weights["Number Gym Activity Completed",1], 3)`) were significantly higher compared to other activities. This pattern underlines the empathy-driven process in teaching, where teachers' engagement with the platform is focused on understanding student challenges.
+After consulting with Zearn educators and administrators, we inferred that teachers with high levels of IC1 apply an empathy-driven pedagogy. In this context, "empathy" refers to teachers' ability to comprehend and engage with students' challenges, as demonstrated by their focused attention on areas where students struggled or succeeded. The weightings in IC1 for activities like Tower Struggles (`r round(ica_weights["Tower Struggled",1], 3)`), Fluency Completed (`r round(ica_weights["Fluency Completed",1], 3)`), Guided Practice Completed (`r round(ica_weights["Guided Practice Completed",1], 3)`), and Number Gym Activity Completed (`r round(ica_weights["Number Gym Activity Completed",1], 3)`) were significantly higher compared to other activities. This pattern underlines this empathy-driven process in teaching, where teachers' engagement with the platform is focused on understanding student challenges.
 
-The second component, IC2, showed substantial weightings on variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., the entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Groups." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Guidance." This component, accounting for a smaller variance (`r round(imod_fast$vafs[3]*100, 3)`%), was harder to interpret due to its complexity and diverse activities.
+The second component, IC2, showed substantial weightings on a variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., the entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Groups." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Guidance." This component, accounting for a smaller variance (`r round(imod_fast$vafs[3]*100, 3)`%), was harder to interpret due to its complexity and diverse activities.
 
 ```{r plm-regression}
 
@@ -852,18 +757,18 @@ ica_fe_subsample <- plm(fmla, data = pUsage, model = "within")
 
 ```
 
-Building upon these findings, we advanced to a censored (lower bound = 0) panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. This model applied a first-difference approach with a lower bound of zero for the dependent variable. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-plm, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fe_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fe_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
+Building upon these findings, we advanced to a fixed-effects panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-plm, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fe_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fe_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
 
 ```{r}
 #| label: tbl-plm
-#| tbl-cap: "Regression of Log Badges on the Independent Components. This table displays the results of a censored panel regression model with a lower bound of 0 for the dependent variable. Standard errors are clustered at the teacher level."
+#| tbl-cap: "Regression of Log Badges on the Independent Components. Results of a panel regression model, clustered standard errors at the teacher level."
 
 ## Graphing Helper Functions
 # Function to format coefficients and standard errors
 format_coef_se <- function(coef, stars, se) {
   paste0(sprintf("%.3f", coef),
          stars,
-         "\n",
+         "<br>",
          "(",
          sprintf("%.4f", se),
          ")")
@@ -922,58 +827,93 @@ merged_summaries <- merged_summaries %>%
       std.error_fe_subsample
     )
   ) %>%
-  select(term, coef_se_fe, coef_se_fe_subsample)
+  select(term, coef_se_fe, coef_se_fe_subsample) %>%
+  mutate(term = case_when(
+    term == "ic1" ~ "IC 1",
+    term == "ic2" ~ "IC 2",
+    term == "ic3" ~ "IC 3",
+    term == "teacher_number_classes" ~ "No. of Classes",
+    .default = term  # Keep all other terms unchanged
+  ))
 
-# Create the gt table with improved formatting
 gt_table <- gt(merged_summaries) %>%
   cols_label(
     term = "",
     coef_se_fe = "All Schools",
     coef_se_fe_subsample = "Zearn Curriculum"
   ) %>%
-  tab_spanner(label = "ln(Badges + 1)",
-              columns = c(coef_se_fe, coef_se_fe_subsample)) %>%
+  tab_spanner(
+    label = "ln(Badges + 1)",
+    columns = c(coef_se_fe, coef_se_fe_subsample)
+  ) %>%
+  tab_footnote(
+    footnote = "Note: * p<0.05; ** p<0.01; *** p<0.001"
+  ) %>%
   rows_add(
     term = c(
       "Average Intercept",
       "R-squared",
-      "N (Teachers, Classes, Weeks, Total)"
+      "N"
     ),
     coef_se_fe = c(
       format_value(mean(fixef(ica_fe_model))),
       format_value(summary(ica_fe_model)$r.squared[1]),
       paste(
-        format_value(n_distinct(
-          index(ica_fe_model$model)$Adult.User.ID
-        )),
-        format_value(pdim(ica_fe_model)$nT$n),
-        format_value(pdim(ica_fe_model)$nT$T),
-        format_value(pdim(ica_fe_model)$nT$N),
-        sep = ", "
+        "Teachers: ", format_value(n_distinct(index(ica_fe_model$model)$Adult.User.ID)),
+        "<br>Classes: ", format_value(pdim(ica_fe_model)$nT$n),
+        "<br>Weeks: ", format_value(pdim(ica_fe_model)$nT$T),
+        "<br>Total: ", format_value(pdim(ica_fe_model)$nT$N),
+        sep = ""
       )
     ),
     coef_se_fe_subsample = c(
       format_value(mean(fixef(ica_fe_subsample))),
       format_value(summary(ica_fe_subsample)$r.squared[1]),
       paste(
-        format_value(n_distinct(
-          index(ica_fe_subsample$model)$Adult.User.ID
-        )),
-        format_value(pdim(ica_fe_subsample)$nT$n),
-        format_value(pdim(ica_fe_subsample)$nT$T),
-        format_value(pdim(ica_fe_subsample)$nT$N),
-        sep = ", "
+        "Teachers: ", format_value(n_distinct(index(ica_fe_subsample$model)$Adult.User.ID)),
+        "<br>Classes: ", format_value(pdim(ica_fe_subsample)$nT$n),
+        "<br>Weeks: ", format_value(pdim(ica_fe_subsample)$nT$T),
+        "<br>Total: ", format_value(pdim(ica_fe_subsample)$nT$N),
+        sep = ""
       )
     )
   ) %>%
-  fmt_markdown(columns = c(coef_se_fe, coef_se_fe_subsample))
+  tab_style(
+    style = cell_text(weight = "bold", align = "center"),
+    locations = cells_column_labels(columns = everything())
+  ) %>%
+  tab_style(
+    style = cell_text(align = "center"),
+    locations = cells_body(columns = c(coef_se_fe, coef_se_fe_subsample))
+  ) %>%
+  tab_style(
+    style = cell_text(align = "left"),
+    locations = cells_stub()
+  ) %>%
+  # Use tab_style to add double lines for model fit statistics
+  tab_style(
+    style = list(
+      cell_borders(
+        sides = "top",
+        style = "double",
+        color = "lightgray",
+        weight = px(4)
+      )),
+    locations = cells_body(
+      columns = everything(),
+      rows = term %in% c("R-squared")
+    )
+  ) %>%
+  fmt_markdown() %>%
+  as_raw_html()
+
 
 # Print the table
 gt_table
 
 ```
 
-The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(teacher_student_usage_subset$Tower.Struggled) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
+The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(unlist(teacher_student_usage_subset[,"Tower Struggled"])) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
 
 ### Study 1b
 
@@ -1001,95 +941,110 @@ df <- df %>%
          MDR.School.ID = factor(MDR.School.ID, ordered = FALSE),
          logBadges = log1p(Badges.per.Active.User))
 
-habits_fe_model <- lm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
-                        month_1 + month_2 + month_3 + month_4 + month_5 +
-                        month_9 + month_10 + month_11 +
-                        Total_Minutes_on_Zearn + mean_streak + mean_time_lag +
-                        MDR.School.ID, data = df)
-habits_fe_model <- lm(Badges.per.Active.User ~ Mon + Tue + Wed + Thu + Fri + Sat +
-                     month_1 + month_2 + month_3 + month_4 + month_5 +
-                     month_9 + month_10 + month_11 +
-                     Total_Minutes_on_Zearn + mean_streak + mean_time_lag +
-                     mean_streak_dow + total_visits +
-                     MDR.School.ID, data = df)
-# habits_fd_model <- pldv(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + Sun + Month +
-#                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
-#                      mean_visits + mean_time_lag,
-#                     data = feUsage, model = "fd", objfun = "lsq",
-#                     lower = 0, sample = "cens")
-
-# summary(habits_fe_model,vcov = vcovHC(habits_fe_model, type = "HC3", cluster = "group"))
-
-# Hausman Test supports Fixed Effects
-# habits_re_model <- plm(logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat +
-#                      month_1 + month_2 + month_3 + month_4 + month_5 + month_6 +
-#                      month_8 + month_9 + month_10 + month_11 + month_12 +
-#                      Total_Minutes_on_Zearn + mean_streak + mean_streak_dow +
-#                      mean_visits + mean_time_lag,
-#                    data = feUsage, model = "random", effect = "individual")
-# phtest(habits_fe_model, habits_re_model)
-# 
-# data:  logBadges ~ Mon + Tue + Wed + Thu + Fri + Sat + month_1 + month_2 +  ...
-# chisq = 227.82, df = 22, p-value < 2.2e-16
-# alternative hypothesis: one model is inconsistent
-
+habits_model <- lm(Badges.per.Active.User ~
+                     Mon + Tue + Wed + Thu + Fri + Sat +
+                     month_1 + month_2 + month_3 +
+                     month_4 + month_5 + month_6 +
+                     month_8 + month_9 +
+                     month_10 + month_11 + month_12 +
+                     Total_Minutes_on_Zearn + mean_streak +
+                     mean_time_lag + mean_streak_dow + total_visits,
+                     data = df)
 ```
 
 ```{r}
 #| label: tbl-habit-regression
 #| tbl-cap: "Regression of Log Average Badges on Habit Variables. This table displays the results of the regression model with school fixed effects. Coefficients on months and days measure the difference between the effects of login percentage relative to the July percentage (for months) and the Sunday percentage (for days). Standard errors are clustered at the school level."
 
-habits_fe_results <- summary(habits_fe_model,
-                      vcov = vcovHC(habits_fe_model,
-                                    type = "HC3",
-                                    cluster = "group")
-                      )$coefficients
+habits_results <- broom::tidy(
+  lmtest::coeftest(
+    habits_model,
+    vcov = sandwich::vcovCL(habits_model,
+                            cluster = ~ MDR.School.ID,
+                            type = "HC3")
+    )
+  )
+# Calculate values for additional rows
+r_squared <- summary(habits_model)$r.squared
+n_total <- nrow(df)
+
+format_coef <- function(coef, se) {
+  paste0(sprintf("%.3f", coef), " (", sprintf("%.3f", se), ")")
+}
 
 # Convert to a gt table
-gt_table <- habits_fe_results %>%
+gt_table <- habits_results %>%
   as.data.frame() %>%
-  rownames_to_column("Variable") %>%
-  mutate(Variable = case_when(
-    Variable == "Mon" ~ "`%`Monday",
-    Variable == "Tue" ~ "`%`Tuesday",
-    Variable == "Wed" ~ "`%`Wednesday",
-    Variable == "Thu" ~ "`%`Thursday",
-    Variable == "Fri" ~ "`%`Friday",
-    Variable == "Sat" ~ "`%`Saturday",
-    Variable == "month_1" ~ "`%`January",
-    Variable == "month_2" ~ "`%`February",
-    Variable == "month_3" ~ "`%`March",
-    Variable == "month_4" ~ "`%`April",
-    Variable == "month_5" ~ "`%`May",
-    # Variable == "month_6" ~ "`%`June",
-    # Variable == "month_8" ~ "`%`August",
-    Variable == "month_9" ~ "`%`September",
-    Variable == "month_10" ~ "`%`October",
-    Variable == "month_11" ~ "`%`November",
-    Variable == "month_12" ~ "`%`December",
-    Variable == "Total_Minutes_on_Zearn" ~ "Avg. Minutes",
-    Variable == "mean_streak" ~ "Avg. Streak",
-    Variable == "mean_time_lag" ~ "Avg. Days \n Between Logins",
-    TRUE ~ Variable  # Default case
-    )) %>%
-  filter(!grepl("MDR.School.ID", Variable)) %>%
+  select(-c("statistic")) %>%
+  mutate(
+    Coefficient = mapply(format_coef, estimate, `std.error`),
+    p_value = mapply(format.pval, `p.value`, digits = 3, eps = .001),
+    term = case_when(
+      term == "Mon" ~ "`%`Monday",
+      term == "Tue" ~ "`%`Tuesday",
+      term == "Wed" ~ "`%`Wednesday",
+      term == "Thu" ~ "`%`Thursday",
+      term == "Fri" ~ "`%`Friday",
+      term == "Sat" ~ "`%`Saturday",
+      term == "month_1" ~ "`%`January",
+      term == "month_2" ~ "`%`February",
+      term == "month_3" ~ "`%`March",
+      term == "month_4" ~ "`%`April",
+      term == "month_5" ~ "`%`May",
+      term == "month_6" ~ "`%`June",
+      term == "month_8" ~ "`%`August",
+      term == "month_9" ~ "`%`September",
+      term == "month_10" ~ "`%`October",
+      term == "month_11" ~ "`%`November",
+      term == "month_12" ~ "`%`December",
+      term == "Total_Minutes_on_Zearn" ~ "Avg. Minutes",
+      term == "mean_streak" ~ "Avg. Streak",
+      term == "mean_time_lag" ~ "Avg. Days Between Logins",
+      term == "mean_streak_dow" ~ "Avg. Weekday Streak",
+      term == "total_visits" ~ "Total Logins",
+      TRUE ~ term  # Default case
+      )) %>%
+  mutate(p_value = sub("0.", ".", p_value)) %>%
+  select(term, Coefficient, p_value) %>%
   gt() %>%
-  fmt_markdown(columns = everything(), rows = TRUE) %>%
-  cols_label(
-    Variable = "Variable",
-    Estimate = "Coefficient",
-    `Std. Error` = "Std. Error",
-    `t value` = "t value",
-    `Pr(>|t|)` = "P Value"
+  tab_spanner(
+    label = "Avg. Weekly Badges",
+    columns = c(Coefficient, p_value)
   ) %>%
-  fmt_number(
-    columns = c(Estimate, `Std. Error`, `t value`, `Pr(>|t|)`),
-    decimals = 3
-  )
+  cols_label(
+    term = "",
+    Coefficient = "Estimate (SE)",
+    p_value = "P-value"
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = c(Coefficient, p_value)
+  ) %>%
+  # Add rows for R-squared and N
+  rows_add(
+    term = c("R-squared", "N"),
+    Coefficient = c(sprintf("%.3f", r_squared), as.character(n_total)),
+    p_value = c("", "")
+  ) %>%
+  # Use tab_style to add double lines for model fit statistics
+  tab_style(
+    style = list(
+      cell_borders(
+        sides = "top",
+        style = "double",
+        color = "lightgray",
+        weight = px(4)
+      )),
+    locations = cells_body(
+      columns = everything(),
+      rows = term %in% c("R-squared")
+    )
+  ) %>%
+  fmt_markdown() %>%
+  as_raw_html()
 
 # Print the table
 gt_table
-
 ```
 
 ```{r friday-example}
@@ -1113,7 +1068,7 @@ mean(unlist(df[,13])) *
 
 ```
 
-In particular, our analysis indicates that shifting 10% of logins from other weekdays to Fridays, without increasing overall platform usage, could boost student lesson completion by around `r round(10 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_fe_model$coefficients[2:6], 2)`%. For the typical teacher, this means switching from one Friday login per month to two while reducing one login from another weekday during that month, resulting in an increase of `r round(14.24 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_fe_model$coefficients[2:6], 2)`% in average weekly lesson completion. This outcome underscores the importance of strategic engagement rather than just login frequency.
+In particular, our analysis indicates that shifting 10% of logins from other weekdays to Fridays, without increasing overall platform usage, could boost student lesson completion by around `r round(10 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_model$coefficients[2:6], 2)`%. For the typical teacher, this means switching from one Friday login per month to two while reducing one login from another weekday during that month, resulting in an increase of `r round(14.24 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_model$coefficients[2:6], 2)`% in average weekly lesson completion. This outcome underscores the importance of strategic engagement rather than just login frequency.
 
 We attribute this pronounced effect to two key factors. First, Friday logins facilitate "Reflective Catch-Up," enabling teachers to review and analyze the previous week's activities and make necessary adjustments. Second, "Foresighted Planning" occurs on Fridays as teachers proactively plan for the upcoming week, a practice less common on weekends.
 
@@ -1238,8 +1193,14 @@ quietly putexcel set study2regress.xlsx, replace
 
 matrix coef = r(table)'
 putexcel A1 = matrix(coef), names
-
 quietly putexcel save
+
+file open myfile using rsquare.txt, write replace
+file write myfile `"`e(r2)'"'
+file close myfile
+file open myfile using ntotal.txt, write replace
+file write myfile `"`e(N)'"'
+file close myfile
 
 ```
 
@@ -1264,7 +1225,6 @@ esize twosample xb if condition == 8  |  condition == 16, by(condition)
 esize twosample xb if condition == 9  |  condition == 16, by(condition)
 esize twosample xb if condition == 8  |  condition == 9, by(condition)
 
-
 ```
 
 ```{r}
@@ -1273,12 +1233,66 @@ esize twosample xb if condition == 8  |  condition == 9, by(condition)
 
 megastudy_model <- readxl::read_xlsx("study2regress.xlsx")
 names(megastudy_model)[1:5] <- c("Treatment", "Coefficient",
-                                 "Std. Error", "t value", "P Value")
+                                 "Std. Error", "t_value", "p_value")
 megastudy_model[c(7:9,33),1] <- c("Empathy", "Friday",
                                   "Friday-control", "Intercept")
 unlink("regress.xlsx")
 
-knitr::kable(megastudy_model[c(7:9,33),1:5], digits = 4)
+megastudy_model[c(7:9,33),1:5] %>%
+  mutate(
+    Coefficient = mapply(format_coef, Coefficient, `Std. Error`),
+    p_value = mapply(format.pval, p_value, digits = 3, eps = .001),
+    Treatment = case_when(
+      Treatment == "Intercept" ~ "Study Control",
+      Treatment == "Empathy" ~ "Empathy",
+      Treatment == "Friday" ~ "Friday",
+      Treatment == "Friday-control" ~ "Friday Control",
+      .default = Treatment  # Default case
+    )
+  ) %>%
+  mutate(p_value = sub("0.", ".", p_value)) %>%
+  select(Treatment, Coefficient, p_value) %>%
+  gt() %>%
+  tab_spanner(
+    label = "Total Badges",
+    columns = c(Coefficient, p_value)
+  ) %>%
+  cols_label(
+    Treatment = "Treatment",
+    Coefficient = "Estimate (SE)",
+    p_value = "P-value"
+  ) %>%
+  cols_align(
+    align = "center",
+    columns = c(Coefficient, p_value)
+  ) %>%
+  # Add rows for R-squared and N
+  rows_add(
+    Treatment = c("R-squared", "N"),
+    Coefficient = c(
+      sprintf("%.3f", as.numeric(readLines("rsquare.txt", warn=FALSE))),
+      readLines("ntotal.txt", warn=FALSE)
+    ),
+    p_value = c("", "")
+  ) %>%
+  # Use tab_style to add double lines for model fit statistics
+  tab_style(
+    style = list(
+      cell_borders(
+        sides = "top",
+        style = "double",
+        color = "lightgray",
+        weight = px(4)
+      )),
+    locations = cells_body(
+      columns = everything(),
+      rows = Treatment %in% c("R-squared")
+    )
+  ) %>%
+  fmt_markdown() %>%
+  as_raw_html()
+unlink("rsquare.txt")
+unlink("ntotal.txt")
 
 ```
 
@@ -1310,7 +1324,7 @@ While rooted in education data, our research introduces a paradigm with signific
 
 The Zearn math educational learning platform provided us with administrative data spanning the 2019-2020 academic year (September 2019 to May 2020). This dataset included detailed teacher actions and classroom-week-level student achievement metrics. Teacher actions on the platform were timestamped to the second. For privacy considerations, Zearn aggregated student data at the classroom-week level, including student achievement measures and indications of student struggles. The dataset covered various schools across Louisiana (@fig-teachers-map).
 
-To promote transparency and replicability of our study, we have deposited the data and code used in our analyses in a publicly accessible database. Researchers and interested parties can access the complete dataset and all related processing scripts at the GitHub repository: <https://github.com/SeanHu0727/zearn_nudge.git>
+To promote transparency and replicability of our study, we have deposited the data and code used in our analyses in a publicly accessible database, available at the GitHub repository: <https://github.com/SeanHu0727/zearn_nudge.git>
 
 ### Inclusion Criteria
 
@@ -1332,27 +1346,31 @@ We extracted all teacher behavioral variables from the dataset that displayed no
 
 ### Panel Regression
 
-We estimated a censored panel regression model using a first difference approach, with the `pldv` function from the `plm` package [@croissant2008] in R and a lower bound of 0 for the dependent variable:
+We estimated a fixed-effects panel regression model with the `plm` package [@croissant2008] in R. The dependent variable was defined as:
 
 $$
-\ln (\text{Badges}_{itc} + 1) = \beta_1 \text{IC1}_{it} + \beta_2 \text{IC2}_{it} + \beta_3 \text{IC3}_{it} + \epsilon_{itc}
+\begin{align*}
+\ln (\text{Badges}_{itc} + 1) = & \ \beta_1 \text{IC1}_{it} + \beta_2 \text{IC2}_{it} + \beta_3 \text{IC3}_{it}  \\
+& + \text{FE}_{\text{Teacher}, i} + \text{FE}_{\text{Week}, t} + \text{FE}_{\text{Class}, c} + \epsilon_{itc}
+\end{align*}
 $$
 
-where $i, c, t$ index the teacher, class, and week, respectively. Standard errors were clustered at the teacher level with the `vcovHC` function [@millo2017] in R.
+where $i$, $c$, and $t$ index the teacher, class, and week, respectively. The model includes fixed effects for teacher ($\text{FE}_{\text{Teacher}, i}$), week ($\text{FE}_{\text{Week}, t}$), and class ($\text{FE}_{\text{Class}, c}$). Standard errors were clustered at the teacher level, calculated using the `vcovHC` function in R.
 
 ## Study 1b
 
 ### Fixed-Effects Regression
 
-We estimated a fixed effects model using the `plm` function[@croissant2008] in R:
+We estimated a linear model using the `lm` function [@rcoreteam2023] in R:
 
-```{=tex}
+$$
 \begin{align*}
-\ln \left( \sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} + 1 \right) = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{Login\%}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{Login\%}_{d,i} \\
+\sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{Login\%}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{Login\%}_{d,i} \\
 & + \beta_{19} \text{(Avg. Minutes)}_i + \beta_{20} \text{(Avg. Streak)}_i \\
-& + \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{School FEs} + \epsilon_i
+& + \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{FE}_{\text{School}} + \epsilon_i
 \end{align*}
-```
+$$
+
 for teacher $i$ with $C_i$ classes. `Login%` represents the percentage of logins by teacher $i$ during each month $m$ and on each day of the week $d$ relative to other months and days, respectively. We exclude July and Sunday to prevent multicollinearity. Standard errors are clustered by school with the `vcovHC` function [@millo2017] in R.
 
 ## Study 2
@@ -1387,11 +1405,14 @@ We designed four emails to be sent on Fridays, emphasizing the importance of reg
 
 This study was conducted in accordance with ethical standards and received exempt status from the Institutional Review Board (IRB) at the University of Pennsylvania. The study's methodologies were designed to ensure the confidentiality and anonymity of all participants involved, adhering strictly to ethical guidelines for educational research. Data received from Zearn was aggregated at the classroom-level, with no identifying information about teachers or students.
 
+{{< pagebreak >}}
+
 # References
 
 ::: {#refs}
 :::
 
+{{< pagebreak >}}
 
 # Supplementary Information {.appendix}
 
@@ -1750,7 +1771,6 @@ PCS_model <- lm(log1p(Badges) ~ ., data = final_df %>%
 
 ```
 
-
 ## Supplementary Tables
 
 ```{r}
@@ -1801,20 +1821,121 @@ t(
 
 Marginal Effects
 
+## Supplementary Figures
+
+```{r}
+#| label: fig-scree
+#| fig-cap: "Elbow (Scree) Plot for Determining Optimal Number of Components. The plot displays the proportion of variance explained by each independent component (IC). The optimal number of components is indicated by the 'elbow' of the plot, where the variance explained by each additional component is minimal."
+
+elbow_plot
+
+```
+
+```{r}
+#| cache: true
+#| label: fig-teachers-map
+#| fig-cap: "Geographical distribution of teachers across various parishes in Louisiana, and the top 5 cities with the highest number of teachers."
+
+library(sf)
+# Set the library path to where proj.db is located
+# Sys.setenv(PROJ_LIB = "")
+library(tidygeocoder)
+library(tigris)
+library(furrr)
+plan(strategy = "multisession", workers = availableCores())
+
+# Batch geocoding
+# Sys.setenv(GEOCODIO_API_KEY = "")
+unique_zipcodes <- unique(teacher_student_usage_subset$zipcode) %>%
+  as.list()
+address_geodata <- furrr::future_map_dfr(.x = unique_zipcodes, 
+                               ~ geo(postalcode = .x,
+                                     country = "United States",
+                                     method = 'geocodio',
+                                     full_results = TRUE,
+                                     progress_bar = FALSE)) %>%
+  select(postalcode,
+         address_components.city,
+         address_components.county,
+         lat, long) %>%
+  rename(
+    city = address_components.city,
+    county = address_components.county
+  ) %>%
+  mutate(
+    postalcode = as.integer(postalcode)
+  )
+
+# Merge the geocoding results back into the original data.table
+n_teachers <- teacher_student_usage_subset %>%
+  group_by(Classroom.ID, Adult.User.ID, MDR.School.ID, zipcode) %>%
+  summarize(Students...Total = mean(Students...Total), 
+            .groups = "keep") %>%
+  left_join(address_geodata, by = c("zipcode" = "postalcode"))
+
+# Get the top 5 cities by number of teachers
+# Aggregate the data to get the number of teachers in each city
+top_cities <- n_teachers %>%
+  group_by(city, county) %>%
+  summarize(
+    num_teachers = n_distinct(Adult.User.ID),
+    lat = mean(lat, na.rm = TRUE),
+    long = mean(long, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  arrange(desc(num_teachers)) %>%
+  slice_head(n = 5)
+
+# Get the Louisiana county map data
+df_map <- tigris::counties(state = "LA",
+                           progress_bar = FALSE) %>%
+  # sf::st_set_crs(4326) %>%
+  left_join(
+    n_teachers %>%
+      group_by(county) %>%
+      summarize(num_teachers = n_distinct(Adult.User.ID)) %>%
+      mutate(county = case_when(
+        county == "Lasalle Parish" ~ "LaSalle Parish",
+        county == "St. John The Baptist Parish" ~ "St. John the Baptist Parish",
+        .default = county)),
+    by = c("NAMELSAD" = "county")
+    ) %>%
+  mutate(num_teachers = ifelse(is.na(num_teachers),0,num_teachers)) %>%
+  sf::st_as_sf()
+
+ggplot() +
+  geom_sf(data = df_map, aes(fill = num_teachers)) +
+  scale_fill_continuous(name = "Number of Teachers",
+                        low = "white", high = "red", na.value = "gray90") +
+  labs(
+    title = "Number of Teachers by Parish in Louisiana"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    axis.text = element_blank(),
+    axis.title = element_blank()
+  ) +
+  geom_point(data = top_cities, aes(x = long, y = lat)) +
+  geom_text_repel(data = top_cities, aes(x = long, y = lat, label = city),
+                  size = 3, color = "black")
+
+```
+
 ## Supplementary Discussion
 
-### Robustnes Checks
+### Original Analysis
 
-
-```{r ICA-no-User-Session}
-#| label: tbl-ica-robust
+```{r ICA-User-Session}
+#| label: tbl-ica-original
 #| tbl-cap: "Independent Component Analysis (ICA) Results without including User Sessions."
 
 # Perform ICA to choose number of components
 # Removing columns with zero variance
 
 ICA_cols <- teacher_student_usage_subset %>%
-  select(`RD.elementary_schedule`:RD.grade_level_teacher_materials) %>%
+  select(`User Session`:RD.grade_level_teacher_materials) %>%
   select(where(~ sd(.x, na.rm = TRUE) != 0)) %>%
   mutate_all(scale)
 
@@ -1852,6 +1973,7 @@ imod_fast2$vafs
 
 ```
 
+### Robustnes Checks
 
 ```{r PCA}
 #| eval: false
