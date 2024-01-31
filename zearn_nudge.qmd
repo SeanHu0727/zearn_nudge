@@ -1,7 +1,5 @@
 ---
 title: "Discovering Data-Driven Nudges to Help Students Learn More Math"
-abstract: ""
-keywords: "Pedagogical Decision-Making, Digital Education Platforms, Empirical Field Data, Instructional Adaptation"
 author:
   - name: Marcos Gallo
     orcid: 0000-0002-8227-2661
@@ -9,15 +7,17 @@ author:
   - name: Ben Manning
   - name: Angela Duckworth
   - name: Colin Camerer
-# format: pdf
-format: docx
+keywords: 
+  - Pedagogical Decision-Making
+  - Digital Education Platforms
+  - Empirical Field Data
+  - Instructional Adaptation
+abstract: |
+  Abstract here.
+plain-language-summary: |
+  Significance statement here.
 bibliography: references.bib
-df-print: paged
-
-execute:
-  echo: false
-  warning: false
-  error: false
+csl: pnas.csl
 ---
 
 ```{r import}
@@ -441,11 +441,11 @@ Our study used a comprehensive dataset from Zearn's educational platform, encomp
 
 Key variables from the dataset included teacher logins, file downloads, and specific interactions with educational content. Additionally, we accessed alongside student data at the classroom-week level, encompassing metrics such as lesson completion (i.e., Badges) and instances of learning difficulties (i.e., Tower Alerts). This granularity allowed for an in-depth analysis of both teacher behaviors and student performance.
 
-The data revealed diverse engagement patterns. Teachers logged into Zearn multiple times weekly, with notable variations in frequency and duration. Student data reflected a broad spectrum of performance levels across different classrooms and schools. The standard deviations of key variables underscored this diversity, as seen in @tbl-summary, which displays comprehensive summary statistics. This rich combination of teacher behaviors and student performance metrics, carefully matched with a weekly frequency for each classroom, allowed for a thorough analysis while upholding privacy standards.
+The data revealed diverse engagement patterns. Teachers logged in multiple times per week, exhibiting variations in the frequency and duration of their interactions. The student data showed a wide range of performance levels across various classrooms and schools. The standard deviations of key variables underscored this diversity, as detailed in the summary statistics of @tbl-summary. This rich combination of teacher behaviors and student performance metrics, carefully matched with a weekly frequency for each classroom, allowed for an in-depth analysis while upholding privacy standards. Note that the analyses in Study 1 underwent post hoc modifications to rectify some recently identified errors. These changes, while adjusting the coefficients slightly, did not significantly alter the overall results or patterns observed (refer to the SI for the original analyses).
 
 ```{r}
 #| label: tbl-summary
-#| tbl-cap: "Study 1 Data. This table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
+#| tbl-cap: "Study 1 Data. The table summarizes key educational metrics for Zearn teachers. The data was collected from July 2019 to June 2020."
 
 teacher_student_usage_subset <- read_csv(file = "./Data/df.csv")
 teacher_usage <- read.csv("Data/raw/Teacher Usage - Time Series 2020-10-09T1635.csv")
@@ -550,7 +550,7 @@ gc(verbose = FALSE)
 
 ### Study 1a
 
-Zearn offers a variety of activities for students and teachers, resulting in a large number of usage variables. We chose to summarize this large set of online activities into more easily interpretable variables through a dimensionality reduction technique. We employed Independent Component Analysis (ICA) on these teacher behavioral variables, given the non-Gaussian nature of the data. This statistical approach allowed us to uncover latent variables that may have been obscured with traditional methods. The resulting components are weighted vectors of specific teacher activities and were estimated to maximize statistical independence in the data-generating process. By examining the explained of each added component, we concluded that three independent components best portray the underlying dimensions of teacher behavior. (For more details, please refer to the SI section and @fig-scree.)
+Zearn offers a variety of activities for students and teachers, resulting in a large number of usage variables. We chose to summarize this large set of online activities into more easily interpretable variables through a dimensionality reduction technique. We employed Independent Component Analysis (ICA) on these teacher behavioral variables, given the non-Gaussian nature of the data [@hyvarinen2000]. This statistical approach allowed us to uncover latent variables that may have been obscured with traditional methods. The resulting components are weighted vectors of specific teacher activities and were estimated to maximize statistical independence in the data-generating process [@hyvarinen2000]. By examining the explained variance of each added component, we concluded that three independent components best portray the underlying dimensions of teacher behavior. (For more details, please refer to the SI section and @fig-scree.)
 
 ```{r ICA}
 
@@ -686,11 +686,11 @@ pheatmap(ica_weights,
 
 ```
 
-The activities with the highest weighting in IC1 were measures associated with Towers (Struggled, Failed, and Completed) in conjunction with other completed student activities such as Fluency, Guided Practice, and Number Gym Activity. Notably, these metrics pertain to teacher logins, not student actions, implying a possible educational "scaffolding" effect, where teachers work through exercises, sometimes deliberately making mistakes, to determine how to break down each problem into smaller, more manageable steps.
+The activities with the highest weighting in IC1 included metrics associated with the "Tower of Power" (Struggled, Failed, and Completed) and other problem-solving exercises (Fluency, Guided Practice, and Number Gym Activity). Notably, the top two variables in this component involved an interactive feature of the Tower of Power when students struggle to understand a concept (i.e., Tower Struggled or Failed). The platform offers tailored support through "Boosts," which break down questions into smaller steps, helping students understand and correct their mistakes. Intriguingly, the metrics in the ICs pertain to teacher activity, suggesting that teachers proactively engage with these problem-solving activities, sometimes deliberately making mistakes, to better understand the student experience. This interaction may help teachers devise strategies to break down complex problems into simpler steps, known as instructional scaffolding.
 
 After consulting with Zearn educators and administrators, we inferred that teachers with high levels of IC1 apply an empathy-driven pedagogy. In this context, "empathy" refers to teachers' ability to comprehend and engage with students' challenges, as demonstrated by their focused attention on areas where students struggled or succeeded. The weightings in IC1 for activities like Tower Struggles (`r round(ica_weights["Tower Struggled",1], 3)`), Fluency Completed (`r round(ica_weights["Fluency Completed",1], 3)`), Guided Practice Completed (`r round(ica_weights["Guided Practice Completed",1], 3)`), and Number Gym Activity Completed (`r round(ica_weights["Number Gym Activity Completed",1], 3)`) were significantly higher compared to other activities. This pattern underlines this empathy-driven process in teaching, where teachers' engagement with the platform is focused on understanding student challenges.
 
-The second component, IC2, showed substantial weightings on a variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., the entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Groups." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Guidance." This component, accounting for a smaller variance (`r round(imod_fast$vafs[3]*100, 3)`%), was harder to interpret due to its complexity and diverse activities.
+The second component, IC2, showed substantial weightings on a variety of Resource Downloads (RD), particularly Small Group Lessons (`r round(ica_weights["Small Group Lesson RD",2], 3)`) and Whole Group (i.e., entire class) Word Problems (`r round(ica_weights["Whole Group Word Problems RD",2], 3)`). We labeled this component as "Classroom Activities." IC3, with strong weights on Resource Download (RD) for the Professional Development (PD) course guide (`r round(ica_weights["PD Course Guide RD",3], 3)`) and course notes (`r round(ica_weights["PD Course Notes RD",3], 3)`), was labeled "Professional Development." This component, accounting for a smaller variance (`r round(imod_fast$vafs[3]*100, 3)`%), was harder to interpret due to more diverse activities.
 
 ```{r plm-regression}
 
@@ -757,11 +757,9 @@ ica_fe_subsample <- plm(fmla, data = pUsage, model = "within")
 
 ```
 
-Building upon these findings, we advanced to a fixed-effects panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-plm, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(summary(ica_fe_model)$coefficients["ic1","Estimate"], 4)` (p \< `r round(summary(ica_fe_model)$coefficients["ic1","Pr(>|t|)"], 4)`), suggesting a significant impact on student achievement.
-
 ```{r}
 #| label: tbl-plm
-#| tbl-cap: "Regression of Log Badges on the Independent Components. Results of a panel regression model, clustered standard errors at the teacher level."
+#| tbl-cap: "Regression of Log Badges on the Independent Components. The table displays the results of a panel regression model with clustered standard errors at the teacher level in parentheses."
 
 ## Graphing Helper Functions
 # Function to format coefficients and standard errors
@@ -913,23 +911,29 @@ gt_table
 
 ```
 
-The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as encountering one more 'Tower Struggle' than average, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(unlist(teacher_student_usage_subset[,"Tower Struggled"])) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
+Building upon these findings, we advanced to a fixed-effects panel regression model that accounted for various temporal and subject-specific variables and the potential impact of teachers handling multiple classes. The regression formula incorporated changes in independent components (IC1, IC2, IC3) as predictors for the change in the logarithm of badges (+1), accounting for individual teachers, classes, and weeks. As presented in @tbl-plm, the regression highlighted a strong positive contemporaneous correlation between IC1 and badges, with a coefficient of `r round(as.numeric(ica_fe_summary[ica_fe_summary$term == "ic1","estimate"]), 4)` (p = `r round(as.numeric(ica_fe_summary[ica_fe_summary$term == "ic1","p.value"]), 4)`), suggesting a significant impact on student achievement. Upon the recommendation of Zearn administrators, we conducted a supplementary analysis focused exclusively on schools using Zearn as their core curriculum or a key supplementary resource. This subset analysis revealed an effect of `r round(as.numeric(ica_fe_subsample_summary[ica_fe_subsample_summary$term == "ic1","estimate"]), 4)` (p = `r round(as.numeric(ica_fe_subsample_summary[ica_fe_subsample_summary$term == "ic1","p.value"]), 4)`), indicating that IC1 is especially significant for those schools.
+
+The correlation we discovered has significant implications. It indicates that an increase in activities associated with IC1, such as increasing the encounters of 'Tower Struggle' by one standard deviation, can lead to an approximate `r round(summary(ica_fe_model)$coefficients[c("ic1","ic2","ic3"),"Estimate"] %*% ica_weights["Tower Struggled",1:3] / sd(unlist(teacher_student_usage_subset[,"Tower Struggled"])) *100, 2)` percent increase in student badges. Although this increase may seem small, it may be substantial in the context of complex human behaviors, where even modest changes often lead to far-reaching effects. This observation highlights the potential of targeted interventions based on our findings to yield significant improvements in educational outcomes.
 
 ### Study 1b
 
 Prompted by @buyalskaya2023, we sought to uncover the subtleties of habitual behaviors within an educational setting. Our primary goal was to understand how regular teacher interactions with the Zearn platform impacted student learning outcomes. To measure this, we used the log-transformed average weekly badges per student over the entire school year as our dependent variable. We constructed our explanatory variables with careful consideration of the patterns that could identify habitual engagement and their relationship to student performance:
 
-1.  Login Percentages across months and days of the week: The frequency of logins across different time periods. For example, among all the logins for a teacher, we assess how many are from January or Tuesdays, compared to all other months and days of the week, respectively. Note that our regression omitted July and Sunday, periods with low login incidence.
+1.  Login Percentages across months and days of the week: The frequency of logins across different time periods. For example, among all the logins for a teacher, we assess how many are from January or Tuesdays, compared to all other months and days of the week, respectively.
 
-2.  Time Spent on Zearn: Teachers' weekly average time spent on the platform, measured in minutes.
+2.  Average Minutes: Teachers' weekly average time spent on the platform, measured in minutes.
 
-3.  Average Streak: Average number of consecutive weekdays in which the teacher logs in.
+3.  Average Streak: Average number of consecutive days in which the teacher logs in, excluding weekends.
 
-4.  Average Days Between Logins: Average number of days between two login instances.
+4.  Average Weekday Streak: Average number of consecutive weekdays in which the teacher logs in (e.g., three Tuesday in a row).
 
-To account for any school-specific factors that may have influenced the relationship between teacher behavior and student achievement, we estimated a school-fixed-effects regression model. Unlike study 1, this regression did not follow each teacher or class across weeks, as our unit of analysis was a teacher summed across classrooms and averaged across all weeks.
+5.  Average Days Between Logins: Average number of days between two login instances.
 
-The regression results, as detailed in @tbl-habit-regression (see Table S2 for full results), revealed that all weekday login percentages positively affected student badges. However, Friday logins stood out significantly, supporting our hypothesis that specific days of the week have more influence on habitual engagement.
+6.  Total Logins: Total number of teacher logins over the entire school year.
+
+To account for any school-specific factors that may have influenced the relationship between teacher behavior and student achievement, we estimated a linear regression model. Unlike study 1, this regression did not follow each teacher or class across weeks, as our unit of analysis was a teacher summed across classrooms and averaged across all weeks. Note that our regression omitted the login percentages from July and Sunday, periods with low login incidence, to avoid multicollinearity.
+
+The regression results, as detailed in @tbl-habit-regression, revealed that all weekday login percentages positively affected student badges. However, Friday logins stood out significantly, suggesting that specific days of the week have more influence on habitual engagement.
 
 ```{r habit-regression}
 
@@ -954,7 +958,7 @@ habits_model <- lm(Badges.per.Active.User ~
 
 ```{r}
 #| label: tbl-habit-regression
-#| tbl-cap: "Regression of Log Average Badges on Habit Variables. This table displays the results of the regression model with school fixed effects. Coefficients on months and days measure the difference between the effects of login percentage relative to the July percentage (for months) and the Sunday percentage (for days). Standard errors are clustered at the school level."
+#| tbl-cap: "Regression of Log Average Badges on Habit Variables. The table displays the results of the regression model with standard errors clustered at the school level in parentheses. Coefficients on months and days measure the difference between the effects of login percentage relative to the July percentage (for months) and the Sunday percentage (for days)."
 
 habits_results <- broom::tidy(
   lmtest::coeftest(
@@ -1045,6 +1049,7 @@ gt_table <- habits_results %>%
 
 # Print the table
 gt_table
+
 ```
 
 ```{r friday-example}
@@ -1070,7 +1075,7 @@ mean(unlist(df[,13])) *
 
 In particular, our analysis indicates that shifting 10% of logins from other weekdays to Fridays, without increasing overall platform usage, could boost student lesson completion by around `r round(10 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_model$coefficients[2:6], 2)`%. For the typical teacher, this means switching from one Friday login per month to two while reducing one login from another weekday during that month, resulting in an increase of `r round(14.24 * c(-1/4, -1/4, -1/4, -1/4, 1) %*% habits_model$coefficients[2:6], 2)`% in average weekly lesson completion. This outcome underscores the importance of strategic engagement rather than just login frequency.
 
-We attribute this pronounced effect to two key factors. First, Friday logins facilitate "Reflective Catch-Up," enabling teachers to review and analyze the previous week's activities and make necessary adjustments. Second, "Foresighted Planning" occurs on Fridays as teachers proactively plan for the upcoming week, a practice less common on weekends.
+We attributed this pronounced effect to two key factors. First, Friday logins facilitate "Reflective Catch-Up," enabling teachers to review and analyze the previous week's activities and make necessary adjustments. Second, "Foresighted Planning" occurs on Fridays as teachers proactively plan for the upcoming week, a practice less common on weekends.
 
 ## Study 2: Nudge Engineering - From Data to Intervention Design
 
@@ -1078,11 +1083,11 @@ In Study 1, we discovered that specific psychopedagogical strategies, habits, an
 
 ### Study 2a
 
-We used the first component from the ICA in Study 1a to design an "empathy" nudge. This intervention involved sending emails to teachers, encouraging them to adopt a more student-centered teaching approach by viewing math problems from their students' perspective. Our analysis in Study 1a indicated that this process was linked to the highest weighted behaviors in IC1. The emails contained key messages emphasizing the importance of empathy in teaching math, advice from other teachers, and helpful tips for assisting students who struggle with a lesson. The emails also suggested specific actions, including using Zearn's features to view lessons from a student's perspective and checking the Tower Alerts Report (see SI for the complete emails). We hypothesized that this empathy approach would significantly enhance student performance.
+We used the first component from the ICA in Study 1a to design an "empathy" nudge. Our analysis in Study 1a indicated that this process was linked to the highest weighted behaviors in IC1. This intervention involved sending emails to teachers, encouraging them to adopt a more student-centered teaching approach by viewing math problems from their students' perspective. The emails contained key related messages that mentioned the general findings of a "recent analysis" (i.e., Study 1a), emphasized the importance of empathy in teaching math, and included advice from other teachers and helpful tips for assisting students who struggle with a lesson. The emails also suggested specific actions, including using Zearn's features to view lessons from a student's perspective and checking the Tower Alerts Report (see SI for the complete emails). We hypothesized that this empathy approach would significantly enhance student performance.
 
 ### Study 2b
 
-In Study 2b, we aimed to test whether nudging teachers to log in on Fridays, as opposed to an unspecified day, would improve student performance. Our approach involved sending emails to teachers, encouraging them to log in on Fridays, highlighting effective teaching habits, and emphasizing the benefits of regular check-ins on student progress. These emails included testimonials from other teachers, research insights, and motivational messages to encourage habit formation (see SI for the complete emails). Our rationale was that Friday logins would aid in reflecting on the week's activities and proactive planning for the following week.
+In Study 2b, we aimed to test whether nudging teachers to log in on Fridays, as opposed to an unspecified day, would improve student performance. Our approach involved sending emails to teachers, encouraging them to log in on Fridays and highlighting effective teaching habits, emphasizing the benefits of regular check-ins on student progress. These emails included testimonials from other teachers, research insights, and motivational messages to encourage habit formation (see SI for the complete emails). Our rationale was that Friday logins would aid in reflecting on the week's activities and proactive planning for the following week.
 
 In addition, we designed a control email tailored to this treatment. These emails were sent every Wednesday to remind Zearn teachers to review their Zearn Pace Report without the personalized behavioral prompts or motivational materials in the Friday treatment group emails. Although the control emails prompted participation with Zearn, they did not provide information on Friday logins, introspection, or strategic preparation.
 
@@ -1229,7 +1234,7 @@ esize twosample xb if condition == 8  |  condition == 9, by(condition)
 
 ```{r}
 #| label: tbl-megastudy-regression
-#| tbl-cap: "Efficacy of Different Teacher Engagement Interventions on Student Learning Outcomes. The table showcases the effects of the 'Empathy' and 'Friday Login' interventions compared to the study-wide control, along with the results from the Friday-specific control group. We measure student achievement by the number of badges students earned."
+#| tbl-cap: "Efficacy of Different Teacher Engagement Interventions on Student Learning Outcomes. The table showcases the marginal effects of the 'Empathy' and 'Friday Login' interventions compared to the study-wide control as a baseline. It also includes the results from the Friday-specific control group. We measure student achievement by the number of badges students earned."
 
 megastudy_model <- readxl::read_xlsx("study2regress.xlsx")
 names(megastudy_model)[1:5] <- c("Treatment", "Coefficient",
@@ -1296,9 +1301,9 @@ unlink("ntotal.txt")
 
 ```
 
-As stated in our preregistration, we evaluated the impact of intervention messages on the number of math lessons completed by students during the four-week intervention period. Students in the megastudy control condition completed a regression-estimated 1.761 lessons during the 4-week intervention period. @tbl-megastudy-regression shows that our interventions increased the number of math lessons completed by students during the intervention period by a regression-estimated average of 0.0487 lessons, which is a 2.77% increase over the megastudy control condition. Specifically, the empathy treatment increased the number of lessons completed by students by 0.0721 lessons, or a 4.09% increase over the megastudy control condition (d = 0.0188, p = .018). The Friday treatment increased the number of lessons completed by students by 0.0550 lessons, or a 1.81% increase over the megastudy control condition (d = 0.0192, p = .068). The Friday treatment was not significantly different from the Friday-specific control (F(1,118137) = 0.85, p = .357).
+As stated in our preregistration, we evaluated the impact of intervention messages on the number of math lessons completed by students during the four-week intervention period [@gallo2022a; @gallo2022b]. Students in the megastudy control condition completed a regression-estimated 1.761 lessons during the 4-week intervention period. @tbl-megastudy-regression shows that our interventions increased the number of math lessons completed by students during the intervention period by a regression-estimated average of 0.0487 lessons, which is a 2.77% increase over the megastudy control condition. Specifically, the empathy treatment increased the number of lessons completed by students by 0.0721 lessons, or a 4.09% increase over the megastudy control condition (d = 0.0188, p = .018). The Friday treatment increased the number of lessons completed by students by 0.0550 lessons, or a 1.81% increase over the megastudy control condition (d = 0.0192, p = .068). The Friday treatment was not significantly different from the Friday-specific control (F(1,118137) = 0.85, p = .357).
 
-Table S3 presents unstandardized coefficients from our primary regression analysis and unadjusted, robust SEs and CIs. Additionally, we utilized the Benjamini-Hochberg (BH) procedure to compute adjusted p-values, which help to control for false discovery rates when conducting multiple comparisons [@benjamini1995]. Before adjusting for multiple hypothesis testing, all treatments exhibited significant benefits. However, only our treatment-specific control had a BH-adjusted p-value of less than 0.05. This intervention involved encouraging teachers to log in to Zearn weekly to receive updated student performance reports. Although reliable, the effect of this intervention was small, resulting in an estimated 0.0898 extra lessons completed in four weeks, or a 5.10% increase over the megastudy control (d = 0.0235, p = .003). Even after applying the James-Stein shrinkage procedure to adjust for the winner's curse (i.e., the maximum of 15 estimated effects is upward biased), we estimated that this intervention still produced 0.061 extra lessons completed, or a 3.46% increase over the control condition [@james1992].
+Table S3 presents unstandardized coefficients from our primary regression analysis and unadjusted, robust SEs and CIs. Additionally, we used the Benjamini-Hochberg (BH) procedure to compute adjusted p-values, which help to control for false discovery rates when conducting multiple comparisons [@benjamini1995]. Before adjusting for multiple hypothesis testing, all treatments exhibited significant benefits. However, only our treatment-specific control had a BH-adjusted p-value of less than 0.05. This intervention involved encouraging teachers to log in to Zearn weekly to receive updated student performance reports. Although reliable, the effect of this intervention was small, resulting in an estimated 0.0898 extra lessons completed in four weeks, or a 5.10% increase over the megastudy control (d = 0.0235, p = .003). Even after applying the James-Stein shrinkage procedure to adjust for the winner's curse (i.e., the maximum of 15 estimated effects is upward biased), we estimated that this intervention still produced 0.061 extra lessons completed, or a 3.46% increase over the control condition [@james1992].
 
 # Discussion
 
@@ -1348,21 +1353,43 @@ We extracted all teacher behavioral variables from the dataset that displayed no
 
 We estimated a fixed-effects panel regression model with the `plm` package [@croissant2008] in R. The dependent variable was defined as:
 
+::: {.content-visible when-format="pdf"}
+```{=tex}
+\begin{align*}
+\ln (\text{Badges}_{itc} + 1) = & \ \beta_1 \text{IC1}_{it} + \beta_2 \text{IC2}_{it} + \beta_3 \text{IC3}_{it}  \\
+& + \text{FE}_{\text{Teacher}, i} + \text{FE}_{\text{Week}, t} + \text{FE}_{\text{Class}, c} + \epsilon_{itc}
+\end{align*}
+```
+:::
+
+::: {.content-visible when-format="docx"}
 $$
 \begin{align*}
 \ln (\text{Badges}_{itc} + 1) = & \ \beta_1 \text{IC1}_{it} + \beta_2 \text{IC2}_{it} + \beta_3 \text{IC3}_{it}  \\
 & + \text{FE}_{\text{Teacher}, i} + \text{FE}_{\text{Week}, t} + \text{FE}_{\text{Class}, c} + \epsilon_{itc}
 \end{align*}
 $$
+:::
 
-where $i$, $c$, and $t$ index the teacher, class, and week, respectively. The model includes fixed effects for teacher ($\text{FE}_{\text{Teacher}, i}$), week ($\text{FE}_{\text{Week}, t}$), and class ($\text{FE}_{\text{Class}, c}$). Standard errors were clustered at the teacher level, calculated using the `vcovHC` function in R.
+where $i$, $c$, and $t$ index the teacher, class, and week, respectively. The model includes fixed effects for teacher ($\text{FE}_{\text{Teacher}, i}$), week ($\text{FE}_{\text{Week}, t}$), and class ($\text{FE}_{\text{Class}, c}$). Standard errors were clustered at the teacher level, calculated using the `vcovHC` function [@millo2017] in R.
 
 ## Study 1b
 
-### Fixed-Effects Regression
+### Linear Regression
 
 We estimated a linear model using the `lm` function [@rcoreteam2023] in R:
 
+::: {.content-visible when-format="pdf"}
+```{=tex}
+\begin{align*}
+\sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{Login\%}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{Login\%}_{d,i} \\
+& + \beta_{19} \text{(Avg. Minutes)}_i + \beta_{20} \text{(Avg. Streak)}_i \\
+& + \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{FE}_{\text{School}} + \epsilon_i
+\end{align*}
+```
+:::
+
+::: {.content-visible when-format="docx"}
 $$
 \begin{align*}
 \sum_{c=1}^{C_i} \text{(Avg. Badges)}_{c} = & \ \beta_0 + \sum_{m=1, m \neq 7}^{12} \beta_m \text{Login\%}_{m,i} + \sum_{d=1, d \neq 7}^{7} \beta_{12+d} \text{Login\%}_{d,i} \\
@@ -1370,8 +1397,9 @@ $$
 & + \beta_{21} \text{(Avg. Days Between Logins)}_i + \text{FE}_{\text{School}} + \epsilon_i
 \end{align*}
 $$
+:::
 
-for teacher $i$ with $C_i$ classes. `Login%` represents the percentage of logins by teacher $i$ during each month $m$ and on each day of the week $d$ relative to other months and days, respectively. We exclude July and Sunday to prevent multicollinearity. Standard errors are clustered by school with the `vcovHC` function [@millo2017] in R.
+for teacher $i$ with $C_i$ classes. `Login%` represents the percentage of logins by teacher $i$ during each month $m$ and on each day of the week $d$ relative to other months and days, respectively. We exclude July and Sunday to prevent multicollinearity. Standard errors are clustered by school with the `vcovCL` function [@zeileis2004; @zeileis2020] in R.
 
 ## Study 2
 

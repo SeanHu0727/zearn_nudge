@@ -1,0 +1,15 @@
+format:
+  docx:
+    fig-format: png
+    fig-dpi: 300
+    df-print: paged
+  pdf:
+    documentclass: article
+    include-in-header:
+      - text: |
+          \usepackage{multirow}
+
+execute:
+  echo: false
+  warning: false
+  error: false
