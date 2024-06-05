@@ -5,6 +5,8 @@ format:
     df-print: paged
   pdf:
     documentclass: article
+    keep-tex: true
+    cite-method: biblatex
     include-in-header:
       - text: |
           \usepackage{multirow}
