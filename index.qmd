@@ -1181,7 +1181,7 @@ end
 /* These are our pre-registered covariates for our primary DV regressions. */
 
 * Main Analysis: Badges
-global badges_covs perc_G1 perc_G2 perc_G4 perc_G5 perc_G6 perc_G7 perc_G8 is_free teacher_badges_pre pre_intv_logins total_associated_students n_classes acct_age missing_classroom_grade opened_weekneg1 opened_week0
+global badges_covs pct_g1 pct_g2 pct_g4 pct_g5 pct_g6 pct_g7 pct_g8 free_account average_student_badges_pre total_teacher_logins_pre total_associated_students total_associated_classes acct_created_days mutliple_classroom_grades school_start_days school_start_date_missing pre_intv_email2_open pre_intv_email1_open
 
 ********************************************
 **# Primary and Secondary DV Regressions #**
@@ -1190,7 +1190,7 @@ global badges_covs perc_G1 perc_G2 perc_G4 perc_G5 perc_G6 perc_G7 perc_G8 is_fr
 * Student Math Performance
 use "Data/megastudy_clean.dta", clear
 // Pre-registered regression
-quietly areg teacher_badges_during ib16.condition $badges_covs [aweight=total_associated_students], absorb(combined_school_id)
+quietly areg average_student_badges ib16.condition $badges_covs [aweight=total_associated_students], absorb(school_fixed_effect)
 
 quietly putexcel set study2regress.xlsx, replace
 
@@ -1210,7 +1210,7 @@ file close myfile
 ```{stata}
 #| eval: false
 
-quietly areg teacher_badges_during ib16.condition $badges_covs [aweight=total_associated_students], absorb(combined_school_id)
+quietly areg average_student_badges ib16.condition $badges_covs [aweight=total_associated_students], absorb(school_fixed_effect)
 predict xb
 
 # Regression-estimated average number of lessons completed by students in the control condition:
