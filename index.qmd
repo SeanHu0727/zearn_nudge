@@ -1473,7 +1473,7 @@ Here, $C$ holds the independent components, $M$ is a mixing matrix, and $E$ deno
 The FastICA process begins by transforming $X$ into a whitened matrix $Y$, ensuring uncorrelated variables with unit variance. This transformation is achieved through eigenvalue decomposition:
 
 $$
-Y = X \times \begin{bmatrix} \frac{\mathbf{v_1}}{\sqrt{\lambda_1}} & \frac{\mathbf{v_2}}{\sqrt{\lambda_2}} & \frac{\mathbf{v_3}}{\sqrt{\lambda_3}} \end{bmatrix},
+Y = X \cdot \begin{bmatrix} \frac{\mathbf{v_1}}{\sqrt{\lambda_1}} & \frac{\mathbf{v_2}}{\sqrt{\lambda_2}} & \frac{\mathbf{v_3}}{\sqrt{\lambda_3}} \end{bmatrix},
 $$
 
 where ($\lambda_1, \lambda_2, \lambda_3$) and ($\mathbf{v_1}, \mathbf{v_2}, \mathbf{v_3}$) are, respectively, the eigenvalues and eigenvectors of $\frac{X'X}{I}$.
@@ -1481,7 +1481,7 @@ where ($\lambda_1, \lambda_2, \lambda_3$) and ($\mathbf{v_1}, \mathbf{v_2}, \mat
 Afterward, the algorithm approximates the negentropy with
 
 $$
-\hat{\theta}(c_n) = (\mathbb{E}[\ln(\cosh(c_n))] − \mathbb{E}[\ln(\cosh(z))])^2
+\hat{\theta}(c_n) = (\mathbb{E}[\ln(\cosh(c_n))] - \mathbb{E}[\ln(\cosh(z))])^2
 $$
 
 where $c_n, n \in {1, 2, 3}$, is one of the components, and $z$ is a Gaussian variable with zero mean and unit variance. FastICA iteratively maximizes this value across all components, producing an orthogonal rotation matrix $R_{3 \times 3}$ such that $C = YR$.
@@ -1831,7 +1831,36 @@ PCS_model <- lm(log1p(Badges) ~ ., data = final_df %>%
 #| label: tbl-ica
 #| tbl-cap: "Independent Component Analysis (ICA) Results. This table displays the weights of each teacher activity in the three independent components (ICs). Notably, these metrics pertain to teacher activity on the platform, not student actions."
 
-rownames(imod_fast$M) <- names(ICA_cols)
+variable_names <- c(
+  "User Session" = "User Session",
+  "RD.optional_problem_sets" = "Optional Problem Sets RD",
+  "RD.student_notes_and_exit_tickets" = "Student Notes and Exit Tickets RD",
+  "RD.mission_overview" = "Mission Overview RD",
+  "RD.pd_course_notes" = "PD Course Notes RD",
+  "RD.elementary_schedule" = "Elementary Schedule RD",
+  "RD.whole_group_fluency" = "Whole Group Fluency RD",
+  "Guided Practice Completed" = "Guided Practice Completed",
+  "RD.small_group_lessons" = "Small Group Lesson RD",
+  "Tower Completed" = "Tower Completed",
+  "Fluency Completed" = "Fluency Completed",
+  "Number Gym Activity Completed" = "Number Gym Activity Completed",
+  "RD.grade_level_overview" = "Grade Level Overview RD",
+  "Tower Stage Failed" = "Tower Stage Failed",
+  "Kindergarten Activity Completed" = "Kindergarten Activity Completed",
+  "Tower Struggled" = "Tower Struggled",
+  "RD.k_mission" = "Kindergarten Mission RD",
+  "RD.whole_group_word_problems" = "Whole Group Word Problems RD",
+  "RD.assessments" = "Assessments RD",
+  "RD.teaching_and_learning_approach" = "Teaching and Learning Approach RD",
+  "RD.optional_homework" = "Optional Homework RD",
+  "RD.k_schedule" = "Kindergarten Schedule RD",
+  "RD.curriculum_map" = "Curriculum Map RD",
+  "RD.assessments_answer_key" = "Assessments Answer Key RD",
+  "RD.pd_course_guide" = "PD Course Guide RD",
+  "RD.grade_level_teacher_materials" = "Grade Level Teacher Materials RD"
+)
+rownames(imod_fast$M) <- variable_names[names(ICA_cols)]
+
 imod_fast$M %>%
   as.data.frame() %>%
   rename(
@@ -1839,11 +1868,26 @@ imod_fast$M %>%
     `IC 2` = V2,
     `IC 3` = V3
   ) %>%
-  arrange(-`IC 1`) %>%
   mutate(
-    `IC 1` = round(`IC 1`, 2),
-    `IC 2` = round(`IC 2`, 2),
-    `IC 3` = round(`IC 3`, 2)
+    Activity = rownames(.),
+    .before = 1
+  ) %>%
+  arrange(desc(`IC 1`)) %>%
+  mutate(
+    across(c(`IC 1`, `IC 2`, `IC 3`), ~ round(., 2))
+  ) %>%
+  gt() %>%
+  fmt_number(
+    columns = c(`IC 1`, `IC 2`, `IC 3`),
+    decimals = 2
+  ) %>%
+  tab_style(
+    style = cell_borders(
+      sides = "bottom",
+      color = "black",
+      weight = px(2)
+    ),
+    locations = cells_column_labels()
   )
 
 ```
@@ -1852,8 +1896,7 @@ imod_fast$M %>%
 #| label: tbl-marginal-effects
 #| tbl-cap: "Marginal Effects of ICA Components on Badges. Marginal effects are calculated by multiplying the ICA coefficients by the mean of each component and dividing by the standard deviation of the corresponding variable."
 
-
-t(
+marginal_effects <- t(
   100 * rbind(
     tcrossprod(summary(ica_fe_model)$coefficients[-1,"Estimate"],
                imod_fast$M[,1:3]),
@@ -1863,13 +1906,24 @@ t(
               select(RD.elementary_schedule:RD.foundational_lesson_guidance) %>%
               select(where(~ sd(.x, na.rm = TRUE) != 0)),
             FUN = sd, MARGIN = 2))
-  ) %>%
+) %>%
   as.data.frame() %>%
   rename(
     `Marginal Effect of 1 SD` = V1,
     `Marginal Effect of 1 Unit` = V2
   ) %>% 
-  arrange(-`Marginal Effect of 1 SD`)
+  # mutate(
+  #   Activity = variable_names[rownames(.)],
+  #   .before = 1
+  # ) %>%
+  arrange(desc(`Marginal Effect of 1 SD`))
+
+marginal_effects %>%
+  gt(rownames_to_stub = T) %>%
+  fmt_number(
+    columns = c(`Marginal Effect of 1 SD`, `Marginal Effect of 1 Unit`),
+    decimals = 2
+  )
 
 ```
 
@@ -1979,7 +2033,7 @@ ggplot() +
 
 ### Original Analysis
 
-```{r ICA-User-Session}
+```{r}
 #| label: tbl-ica-original
 #| tbl-cap: "Independent Component Analysis (ICA) Results without including User Sessions."
 
@@ -2007,21 +2061,40 @@ for (i in 1:ncol(imod_fast2$M)) {
 }
 
 rownames(imod_fast2$M) <- names(ICA_cols)
-imod_fast2$M %>%
+
+ica_results <- imod_fast2$M %>%
   as.data.frame() %>%
-  arrange(-V1) %>%
-  mutate(
-    V1 = round(V1, 2),
-    V2 = round(V2, 2),
-    V3 = round(V3, 2)
-  ) %>%
   rename(
     `IC 1` = V1,
     `IC 2` = V2,
     `IC 3` = V3
+  ) %>%
+  mutate(
+    Activity = variable_names[rownames(.)],
+    .before = 1
+  ) %>%
+  arrange(desc(`IC 1`)) %>%
+  mutate(
+    across(c(`IC 1`, `IC 2`, `IC 3`), ~ round(., 2))
   )
-  
-imod_fast2$vafs
+
+
+ica_results %>%
+  gt() %>%
+  fmt_number(
+    columns = c(`IC 1`, `IC 2`, `IC 3`),
+    decimals = 2
+  ) %>%
+  tab_source_note(
+    source_note = paste("Variance Accounted For:",
+                        paste(round(imod_fast2$vafs * 100, 2), collapse = "%, "),
+                        "%")
+  ) %>%
+  cols_label(
+    `IC 1` = "IC 1",
+    `IC 2` = "IC 2",
+    `IC 3` = "IC 3"
+  )
 
 ```
 
