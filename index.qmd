@@ -28,6 +28,7 @@ library(tidyverse)
 # library(zoo)
 library(ggrepel)
 library(gt)
+library(RColorBrewer)
 library(caret)
 library(Statamarkdown)
 set.seed(794563797)
@@ -664,12 +665,35 @@ ordered <- as.data.frame(ica_weights) %>%
   arrange(desc(V1), desc(V2), desc(V3))
 ica_weights <- ica_weights[rownames(ordered), ]
 
+# Define breaks
+breaks <- seq(-0.1, 1, length.out = 10)
+
+# Define the calculate_annotations function
+calculate_annotations <- function(mat) {
+  data <- as.vector(mat)
+  data <- data[data > breaks[4]]
+  high <- max(data)
+  low <- min(data)
+  median <- ifelse(any(data == median(data)), median(data),
+                   data[which.min(abs(data - median(data)))])
+  
+  result <- matrix("", nrow = nrow(mat), ncol = ncol(mat))
+  for (i in 1:nrow(mat)) {
+    for (j in 1:ncol(mat)) {
+      if (mat[i, j] == low || mat[i, j] == high || mat[i, j] == median) {
+        result[i, j] <- round(mat[i, j], 2)
+      }
+    }
+  }
+  return(result)
+}
+
 # Create the heatmap
 pheatmap(ica_weights,
          cluster_rows = FALSE,
          cluster_cols = FALSE,
-         color = colorRampPalette(c("white", "red"))(10),
-         breaks = seq(-0.1, 1, length.out = 10),
+         color = colorRampPalette(c("white",brewer.pal(9, "Reds")))(10),
+         breaks = breaks,
          show_colnames = TRUE,
          show_rownames = TRUE,
          fontsize_row = 10,
@@ -680,11 +704,9 @@ pheatmap(ica_weights,
            sprintf("IC3 \n (%.1f%%)", imod_fast$vafs[3] * 100)
            ),
          angle_col = 0,
-         cell_fun = function(j, i, x, y, width, height) {
-             if (ica_weights[i, j] > 0.6) {
-                 text(x, y, round(ica_weights[i, j], 2), col = "black", cex = 0.8)
-             }
-         })
+         display_numbers = calculate_annotations(ica_weights),
+         number_color = "black",
+         border_color = NA)
 
 ```
 
@@ -1909,19 +1931,19 @@ marginal_effects <- t(
 ) %>%
   as.data.frame() %>%
   rename(
-    `Marginal Effect of 1 SD` = V1,
-    `Marginal Effect of 1 Unit` = V2
+    `Effect of 1 SD` = V1,
+    `Effect of 1 Unit` = V2
   ) %>% 
   # mutate(
   #   Activity = variable_names[rownames(.)],
   #   .before = 1
   # ) %>%
-  arrange(desc(`Marginal Effect of 1 SD`))
+  arrange(desc(`Effect of 1 SD`))
 
 marginal_effects %>%
   gt(rownames_to_stub = T) %>%
   fmt_number(
-    columns = c(`Marginal Effect of 1 SD`, `Marginal Effect of 1 Unit`),
+    columns = c(`Effect of 1 SD`, `Effect of 1 Unit`),
     decimals = 2
   )
 
