@@ -1,5 +1,28 @@
-# Read in the data
-df <- readr::read_csv("/Users/benjaminmanning/Desktop/df_habits.csv")
+suppressPackageStartupMessages({
+  suppressWarnings({
+    library(here)
+    library(plm)
+    library(readr)
+    library(broom)
+    library(gt)
+    library(conflicted)
+    library(tidyr)
+    library(ggplot2)
+    library(dplyr)
+    library(patchwork)
+    library(lubridate)
+    
+    # Explicitly prefer dplyr functions
+    suppressMessages({
+      conflicts_prefer(dplyr::filter)
+      conflicts_prefer(dplyr::select)
+      conflicts_prefer(dplyr::summarize)
+      conflicts_prefer(dplyr::lead)
+    })
+  })
+})
+
+df <- read.csv(here("plots/df_habits.csv"))
 
 df <- df %>%
   mutate(Adult.User.ID = factor(Adult.User.ID, ordered = FALSE),
@@ -137,15 +160,28 @@ plot_data <- habits_results %>%
     ),
     # Calculate 95% confidence intervals
     ci_lower = estimate - 1.96 * std.error,
-    ci_upper = estimate + 1.96 * std.error
+    ci_upper = estimate + 1.96 * std.error,
+    # Add color flag for Friday
+    is_friday = ifelse(term == "Fri", "Friday", "Other"),
+    # Make small error bars slightly more visible (minimum visual width)
+    ci_range = ci_upper - ci_lower,
+    min_visual_range = max(ci_range) * 0.05,  # Minimum 15% of max range
+    ci_lower_display = ifelse(ci_range < min_visual_range, 
+                              estimate - min_visual_range/2, 
+                              ci_lower),
+    ci_upper_display = ifelse(ci_range < min_visual_range, 
+                              estimate + min_visual_range/2, 
+                              ci_upper)
   )
 
 # Create the coefficient plot
-coef_plot <- ggplot(plot_data, aes(x = reorder(term_label, estimate), y = estimate)) +
+coef_plot <- ggplot(plot_data, aes(x = reorder(term_label, estimate), y = estimate, color = is_friday)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.5) +
-  geom_errorbar(aes(ymin = ci_lower, ymax = ci_upper), 
-                width = 0.2, color = "steelblue", size = 0.8) +
-  geom_point(size = 2, color = "steelblue") +
+  geom_errorbar(aes(ymin = ci_lower_display, ymax = ci_upper_display), 
+                width = 0.2, size = 0.8) +
+  geom_point(size = 2.5) +
+  scale_color_manual(values = c("Friday" = "#D32F2F", "Other" = "steelblue"),
+                     guide = "none") +  # Hide legend
   labs(
     title = "",
     x = "",

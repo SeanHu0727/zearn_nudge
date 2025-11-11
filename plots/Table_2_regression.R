@@ -260,10 +260,14 @@ coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = model)) 
   theme(
     panel.grid.major.y = element_blank(),
     panel.grid.minor = element_blank(),
-    legend.position = "bottom",
+    legend.position = c(0.8, 0.2),  # Position inside plot (x, y coordinates from 0 to 1)
+    legend.background = element_rect(fill = "white", color = "gray80", linewidth = 0.3),
+    legend.key.size = unit(0.4, "cm"),  # Smaller legend keys
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
     axis.text = element_text(size = 10),
     axis.title = element_text(size = 11),
-    plot.title = element_text(size = 12, hjust = 0.5, face = "bold")
+    plot.title = element_text(size = 10, hjust = 0.5, face = "bold")  # Smaller title
   )
 
 print(coef_plot)

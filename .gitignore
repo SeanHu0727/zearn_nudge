@@ -8,3 +8,7 @@ index_cache
 index_files
 
 /.quarto/
+
+.Rprofile*
+.Rprofile
+Rplots.pdf
