@@ -12,8 +12,7 @@ suppressPackageStartupMessages({
     library(patchwork)
     library(cowplot)
     library(lubridate)
-    
-    # Explicitly prefer dplyr functions
+
     suppressMessages({
       conflicts_prefer(dplyr::filter)
       conflicts_prefer(dplyr::select)
@@ -23,61 +22,90 @@ suppressPackageStartupMessages({
   })
 })
 
+# ---- ICA loadings plot ----
 
-# IC1 — Empathy-driven engagement (student-perspective practice / scaffolding): Heavy weights on Tower of Power interactions (Struggled/Failed/Completed), Fluency, Guided Practice, Number Gym. Interpreted as teachers working through problems as students would to understand struggles and plan scaffolding.
-
-# IC2 — Classroom activities / materials use: Large weights on Resource Downloads for Small-Group Lessons and Whole-Group Word Problems. Interpreted as preparing and running in-class activities.
-
-# IC3 — Professional development orientation: Weights on Resource Downloads for PD course guides and course notes. Interpreted as engaging with professional-development materials (smaller share of variance, harder to interpret).
-df.raw = read.csv(here("plots/ica_weights.csv"))
+df.raw <- read_csv(here("plots/ica_weights.csv"))
 
 df <- df.raw |>
-    pivot_longer(cols = -vars, names_to = "ic_name", values_to = "value") |>
-    mutate(ic_name = case_when(
-        ic_name == "V1" ~ "IC1 (15.4%)",
-        ic_name == "V2" ~ "IC2 (12.6%)",
-        ic_name == "V3" ~ "IC3 (6.3%)" 
+  pivot_longer(cols = -vars, names_to = "ic_name", values_to = "value") |>
+  mutate(
+    ic_name = case_when(
+      ic_name == "V1" ~ "IC1 (15.4%)",
+      ic_name == "V2" ~ "IC2 (12.6%)",
+      ic_name == "V3" ~ "IC3 (6.3%)",
+      TRUE ~ ic_name
     ),
+    # Category mapping for color
+    category = case_when(
+      vars %in% c(
+        "Tower Struggled",
+        "Tower Stage Failed",
+        "Fluency Completed",
+        "Guided Practice Completed",
+        "Number Gym Activity Completed",
+        "Tower Completed",
+        "Kindergarten Activity Completed"
+      ) ~ "Student-mode digital work",
+      vars %in% c(
+        "Small Group Lesson RD",
+        "Whole Group Word Problems RD",
+        "Optional Problem Sets RD",
+        "Whole Group Fluency RD",
+        "Optional Homework RD",
+        "Assessments RD",
+        "Assessments Answer Key RD",
+        "Student Notes and Exit Tickets RD"
+      ) ~ "Classroom resources",
+      TRUE ~ "PD & planning"
+    ),
+    # Order variables top-to-bottom as in the figure
     vars = factor(vars, levels = c(
-"Kindergarten Activity Completed",
-"Kindergarten Mission RD",
-"Kindergarten Schedule RD",
-"Elementary Schedule RD",
-"Curriculum Map RD",
-"Teaching and Learning Approach RD",
-"Grade Level Overview RD",
-"PD Course Notes RD",
-"PD Course Guide RD",
-"Mission Overview RD",
-"Student Notes and Exit Tickets RD",
-"Assessments Answer Key RD",
-"Assessments RD",
-"Optional Homework RD",
-"Whole Group Fluency RD",
-"Optional Problem Sets RD",
-"Whole Group Word Problems RD",
-"Small Group Lesson RD",
-"Tower Completed",
-"Number Gym Activity Completed",
-"Guided Practice Completed",
-"Fluency Completed",
-"Tower Stage Failed",
-"Tower Struggled"))
-)
-    # sort by IC1 value
+      "Kindergarten Activity Completed",
+      "Kindergarten Mission RD",
+      "Kindergarten Schedule RD",
+      "Elementary Schedule RD",
+      "Curriculum Map RD",
+      "Teaching and Learning Approach RD",
+      "Grade Level Overview RD",
+      "PD Course Notes RD",
+      "PD Course Guide RD",
+      "Mission Overview RD",
+      "Student Notes and Exit Tickets RD",
+      "Assessments Answer Key RD",
+      "Assessments RD",
+      "Optional Homework RD",
+      "Whole Group Fluency RD",
+      "Optional Problem Sets RD",
+      "Whole Group Word Problems RD",
+      "Small Group Lesson RD",
+      "Tower Completed",
+      "Number Gym Activity Completed",
+      "Guided Practice Completed",
+      "Fluency Completed",
+      "Tower Stage Failed",
+      "Tower Struggled"
+    ))
+  )
 
-
-g = ggplot(df, aes(x = value, y = vars)) +
-    geom_col() +
-    facet_wrap(~ic_name) +
-    labs(x = "Weight", y = "") +
-    theme_bw() +
-    geom_hline(yintercept = 0, color = "black", linewidth = 0.5) +
-    theme(
-        panel.grid.minor = element_blank(),
-        axis.text.y = element_text(size = 7),
-        panel.grid.major = element_blank()
-        )
+g <- ggplot(df, aes(x = value, y = vars, fill = category)) +
+  geom_vline(xintercept = 0, color = "gray60", linewidth = 0.4) +
+  geom_col() +
+  facet_wrap(~ ic_name) +
+  scale_fill_manual(values = c(
+    "Student-mode digital work" = "#7195A3",
+    "Classroom resources" = "#B39C7D",
+    "PD & planning" = "#8B9B8B"
+  )) +
+  labs(x = "Weight", y = "", fill = "") +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank(),
+    axis.text.y = element_text(size = 7),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "bold"),
+    legend.position = "none"
+  )
 
 
 
@@ -290,15 +318,15 @@ gt_table <- gt(merged_summaries) %>%
 
 # Prepare data for coefficient plot
 coef_plot_data <- bind_rows(
-  ica_fe_summary %>%
-    mutate(
-      model = "All Schools",
-      lower = estimate - 1.96 * std.error,
-      upper = estimate + 1.96 * std.error
-    ),
   ica_fe_subsample_summary %>%
     mutate(
       model = "Zearn Curriculum",
+      lower = estimate - 1.96 * std.error,
+      upper = estimate + 1.96 * std.error
+    ),
+  ica_fe_summary %>%
+    mutate(
+      model = "All Schools",
       lower = estimate - 1.96 * std.error,
       upper = estimate + 1.96 * std.error
     )
@@ -309,42 +337,45 @@ coef_plot_data <- bind_rows(
     term == "ic1" ~ "IC 1",
     term == "ic2" ~ "IC 2",
     term == "ic3" ~ "IC 3",
-    term == "teacher_number_classes" ~ "No. of Classes",
+    term == "teacher_number_classes" ~ "# of\nClasses",
     .default = term
   )) %>%
   # Reorder terms for better visualization
-  mutate(term = factor(term, levels = c("No. of Classes", "IC 3", "IC 2", "IC 1")))
+  mutate(term = factor(term, levels = c("# of\nClasses", "IC 3", "IC 2", "IC 1"))) %>%
+  # Order model factor to put Zearn on left
+  mutate(model = factor(model, levels = c("Zearn Curriculum", "All Schools"))) %>%
+  # Add color variable - only IC1 in Zearn Curriculum gets colored
+  mutate(color_group = ifelse(term == "IC 1" & model == "Zearn Curriculum", "IC1_Zearn", "Other"))
 
 # Create coefficient plot
-coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = model)) +
+coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = color_group)) +
   geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.5) +
-  geom_point(position = position_dodge(width = 0.5), size = 3) +
+  geom_point(size = 1.75) +
   geom_errorbar(
     aes(xmin = lower, xmax = upper),
-    position = position_dodge(width = 0.5),
-    width = 0.2,
-    linewidth = 0.8,
-    orientation = "y"
+    width = 0.125,
+    linewidth = 0.7
   ) +
-  scale_color_manual(values = c("All Schools" = "#4A7BA7", "Zearn Curriculum" = "#A64F4F")) +
+  facet_wrap(~model) +
+  scale_color_manual(values = c("IC1_Zearn" = "#A64F4F", "Other" = "black"), guide = "none") +
   labs(
-    x = "",
-    y = "",
-    title = "Dep. Variable: ln(Badges + 1)"
+    x = "Effect on ln(Badges + 1)",
+    y = ""
+    # title = "Dep. Variable: ln(Badges + 1)"
   ) +
   theme_bw() +
   theme(
-    panel.grid.major.y = element_blank(),
+    panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    legend.position = 'bottom',
-    legend.title = element_blank(),
+    strip.background = element_rect(fill = "white"),
+    strip.text = element_text(face = "bold")
   )
 
 # Combine plots: 2/3 width for g, 1/3 width for coef_plot
 # Using cowplot for more stable combining
 combined_plot <- plot_grid(g, coef_plot, 
                            ncol = 2, 
-                           rel_widths = c(2, 1),
+                           rel_widths = c(1.5, 1),
                            align = "h",
                            axis = "tb")
 

@@ -80,11 +80,13 @@ gt_table <- habits_results %>%
       term == "month_10" ~ "`%`October",
       term == "month_11" ~ "`%`November",
       term == "month_12" ~ "`%`December",
-      term == "Total_Minutes_on_Zearn" ~ "Avg. Minutes",
+      term == "Total_Minutes_on_Zearn" ~ "Avg. Min",
       term == "mean_streak" ~ "Avg. Streak",
-      term == "mean_time_lag" ~ "Avg. Days Between Logins",
-      term == "mean_streak_dow" ~ "Avg. Weekday Streak",
-      term == "total_visits" ~ "Total Logins",
+      # average days between logins
+      term == "mean_time_lag" ~ "ADBL",
+      # average weekday streak
+      term == "mean_streak_dow" ~ "AWS",
+      term == "total_visits" ~ "Total Lgns",
       TRUE ~ term  # Default case
     )) %>%
   mutate(p_value = sub("0.", ".", p_value)) %>%
@@ -151,11 +153,12 @@ plot_data <- habits_results %>%
       term == "month_10" ~ "October",
       term == "month_11" ~ "November",
       term == "month_12" ~ "December",
-      term == "Total_Minutes_on_Zearn" ~ "Avg. Minutes",
+      term == "Total_Minutes_on_Zearn" ~ "Avg. Min",
       term == "mean_streak" ~ "Avg. Streak",
-      term == "mean_time_lag" ~ "Avg. Days Between Logins",
-      term == "mean_streak_dow" ~ "Avg. Weekday Streak",
-      term == "total_visits" ~ "Total Logins",
+      term == "mean_time_lag" ~ "ADBL",
+      # average weekday streak
+      term == "mean_streak_dow" ~ "AWS",
+      term == "total_visits" ~ "Total Lgns",
       TRUE ~ term
     ),
     # Calculate 95% confidence intervals
@@ -178,23 +181,22 @@ plot_data <- habits_results %>%
 coef_plot <- ggplot(plot_data, aes(x = reorder(term_label, estimate), y = estimate, color = is_friday)) +
   geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.5) +
   geom_errorbar(aes(ymin = ci_lower_display, ymax = ci_upper_display), 
-                width = 0.2, size = 0.8) +
-  geom_point(size = 2.5) +
-  scale_color_manual(values = c("Friday" = "#D32F2F", "Other" = "steelblue"),
+                width = 0.15, size = 0.8) +
+  geom_point(size = 2) +
+  scale_color_manual(values = c("Friday" = "#D32F2F", "Other" = "black"),
                      guide = "none") +  # Hide legend
   labs(
     title = "",
     x = "",
-    y = "Log(Avg. Weekly Badges/Student + 1)",
-    caption = "Error bars represent 95% confidence intervals"
+    y = "Log(Avg. Weekly Badges\nStudent + 1)",
   ) +
   theme_bw() +
   theme(
     plot.title = element_text(face = "bold", hjust = 0.5),
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    axis.title.y = element_text(size = 10),
-    axis.text.x = element_text(angle = 45, hjust = 1, size = 10)
+    axis.title.y = element_text(size = 8),
+    axis.text.x = element_text(angle = 35, hjust = 1, size = 7)
   )
 
 coef_plot
@@ -204,6 +206,6 @@ ggsave(
   filename = "/Users/benjaminmanning/Desktop/coefficient_plot.png", 
   plot = coef_plot, 
   width = 8, 
-  height = 4, 
+  height = 2, 
   dpi = 300
 )
