@@ -24,15 +24,15 @@ suppressPackageStartupMessages({
 
 # ---- ICA loadings plot ----
 
-df.raw <- read_csv(here("plots/ica_weights.csv"))
+df.raw <- read_csv(here("plots/ica_weights.csv"), show_col_types = FALSE)
 
 df <- df.raw |>
   pivot_longer(cols = -vars, names_to = "ic_name", values_to = "value") |>
   mutate(
     ic_name = case_when(
-      ic_name == "V1" ~ "IC1 (15.4%)",
-      ic_name == "V2" ~ "IC2 (12.6%)",
-      ic_name == "V3" ~ "IC3 (6.3%)",
+      ic_name == "V1" ~ "IC1 - Empathy (15.4%)",
+      ic_name == "V2" ~ "IC2 - Group Activities (12.6%)",
+      ic_name == "V3" ~ "IC3 - Scheduling & Planning (6.3%)",
       TRUE ~ ic_name
     ),
     # Category mapping for color
@@ -58,56 +58,82 @@ df <- df.raw |>
       ) ~ "Classroom resources",
       TRUE ~ "PD & planning"
     ),
+    # Create three-letter acronyms
+    vars_acronym = case_when(
+      vars == "Tower Struggled" ~ "TWS",
+      vars == "Tower Stage Failed" ~ "TSF",
+      vars == "Fluency Completed" ~ "FLC",
+      vars == "Guided Practice Completed" ~ "GPC",
+      vars == "Number Gym Activity Completed" ~ "NGA",
+      vars == "Tower Completed" ~ "TWC",
+      vars == "Kindergarten Activity Completed" ~ "KAC",
+      vars == "Small Group Lesson RD" ~ "SGL",
+      vars == "Whole Group Word Problems RD" ~ "WGW",
+      vars == "Optional Problem Sets RD" ~ "OPS",
+      vars == "Whole Group Fluency RD" ~ "WGF",
+      vars == "Optional Homework RD" ~ "OHW",
+      vars == "Assessments RD" ~ "ASS",
+      vars == "Assessments Answer Key RD" ~ "AAK",
+      vars == "Student Notes and Exit Tickets RD" ~ "SNE",
+      vars == "Mission Overview RD" ~ "MIO",
+      vars == "PD Course Guide RD" ~ "PDG",
+      vars == "PD Course Notes RD" ~ "PDN",
+      vars == "Grade Level Overview RD" ~ "GLO",
+      vars == "Teaching and Learning Approach RD" ~ "TLA",
+      vars == "Curriculum Map RD" ~ "CRM",
+      vars == "Elementary Schedule RD" ~ "ELS",
+      vars == "Kindergarten Schedule RD" ~ "KSC",
+      vars == "Kindergarten Mission RD" ~ "KMI",
+      TRUE ~ vars
+    ),
     # Order variables top-to-bottom as in the figure
-    vars = factor(vars, levels = c(
-      "Kindergarten Activity Completed",
-      "Kindergarten Mission RD",
-      "Kindergarten Schedule RD",
-      "Elementary Schedule RD",
-      "Curriculum Map RD",
-      "Teaching and Learning Approach RD",
-      "Grade Level Overview RD",
-      "PD Course Notes RD",
-      "PD Course Guide RD",
-      "Mission Overview RD",
-      "Student Notes and Exit Tickets RD",
-      "Assessments Answer Key RD",
-      "Assessments RD",
-      "Optional Homework RD",
-      "Whole Group Fluency RD",
-      "Optional Problem Sets RD",
-      "Whole Group Word Problems RD",
-      "Small Group Lesson RD",
-      "Tower Completed",
-      "Number Gym Activity Completed",
-      "Guided Practice Completed",
-      "Fluency Completed",
-      "Tower Stage Failed",
-      "Tower Struggled"
+    vars_acronym = factor(vars_acronym, levels = c(
+      "KAC",
+      "KMI",
+      "KSC",
+      "ELS",
+      "CRM",
+      "TLA",
+      "GLO",
+      "PDN",
+      "PDG",
+      "MIO",
+      "SNE",
+      "AAK",
+      "ASS",
+      "OHW",
+      "WGF",
+      "OPS",
+      "WGW",
+      "SGL",
+      "TWC",
+      "NGA",
+      "GPC",
+      "FLC",
+      "TSF",
+      "TWS"
     ))
   )
 
-g <- ggplot(df, aes(x = value, y = vars, fill = category)) +
-  geom_vline(xintercept = 0, color = "gray60", linewidth = 0.4) +
+g <- ggplot(df, aes(x = value, y = vars_acronym, fill = category)) +
+  geom_vline(xintercept = 0, color = "black", linewidth = 0.25) +
   geom_col() +
   facet_wrap(~ ic_name) +
   scale_fill_manual(values = c(
-    "Student-mode digital work" = "#7195A3",
-    "Classroom resources" = "#B39C7D",
-    "PD & planning" = "#8B9B8B"
+    "Student-mode digital work" = "#A64F4F",
+    "Classroom resources" = "#F4B942",
+    "PD & planning" = "#7B9FB0"
   )) +
   labs(x = "Weight", y = "", fill = "") +
   theme_bw() +
   theme(
     panel.grid.minor = element_blank(),
     panel.grid.major = element_blank(),
-    axis.text.y = element_text(size = 7),
-    strip.background = element_rect(fill = "white"),
+    axis.text.y = element_text(size = 6),
+    axis.title.x = element_text(size = 8),
     strip.text = element_text(face = "bold"),
     legend.position = "none"
   )
-
-
 
 teacher_student_usage_subset <- read.csv(here("plots/teacher_student_usage_subset.csv"))
 
@@ -334,22 +360,22 @@ coef_plot_data <- bind_rows(
   # Filter for only IC1, IC2, IC3, and number of classes
   filter(term %in% c("ic1", "ic2", "ic3", "teacher_number_classes")) %>%
   mutate(term = case_when(
-    term == "ic1" ~ "IC 1",
-    term == "ic2" ~ "IC 2",
-    term == "ic3" ~ "IC 3",
+    term == "ic1" ~ "IC1",
+    term == "ic2" ~ "IC2",
+    term == "ic3" ~ "IC3",
     term == "teacher_number_classes" ~ "# of\nClasses",
     .default = term
   )) %>%
   # Reorder terms for better visualization
-  mutate(term = factor(term, levels = c("# of\nClasses", "IC 3", "IC 2", "IC 1"))) %>%
+  mutate(term = factor(term, levels = c("# of\nClasses", "IC3", "IC2", "IC1"))) %>%
   # Order model factor to put Zearn on left
   mutate(model = factor(model, levels = c("Zearn Curriculum", "All Schools"))) %>%
   # Add color variable - only IC1 in Zearn Curriculum gets colored
-  mutate(color_group = ifelse(term == "IC 1" & model == "Zearn Curriculum", "IC1_Zearn", "Other"))
+  mutate(color_group = ifelse(term == "IC1" & model == "Zearn Curriculum", "IC1_Zearn", "Other"))
 
 # Create coefficient plot
-coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = color_group)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "gray50", linewidth = 0.5) +
+coef_plot <- ggplot(coef_plot_data |> filter(model == "Zearn Curriculum"), aes(x = estimate, y = term, color = color_group)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 0.5) +
   geom_point(size = 1.75) +
   geom_errorbar(
     aes(xmin = lower, xmax = upper),
@@ -357,7 +383,7 @@ coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = color_gr
     linewidth = 0.7
   ) +
   facet_wrap(~model) +
-  scale_color_manual(values = c("IC1_Zearn" = "#A64F4F", "Other" = "black"), guide = "none") +
+  scale_color_manual(values = c("IC1_Zearn" = "red", "Other" = "black"), guide = "none") +
   labs(
     x = "Effect on ln(Badges + 1)",
     y = ""
@@ -367,7 +393,7 @@ coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = color_gr
   theme(
     panel.grid.major = element_blank(),
     panel.grid.minor = element_blank(),
-    strip.background = element_rect(fill = "white"),
+    axis.title.x = element_text(size = 8),
     strip.text = element_text(face = "bold")
   )
 
@@ -375,7 +401,7 @@ coef_plot <- ggplot(coef_plot_data, aes(x = estimate, y = term, color = color_gr
 # Using cowplot for more stable combining
 combined_plot <- plot_grid(g, coef_plot, 
                            ncol = 2, 
-                           rel_widths = c(1.5, 1),
+                           rel_widths = c(2, 1),
                            align = "h",
                            axis = "tb")
 
@@ -387,6 +413,5 @@ ggsave(
   filename = "/Users/benjaminmanning/Desktop/combined_ica_plots.png",
   plot = combined_plot,
   width = 12,
-  height = 3,
-  dpi = 300
+  height = 3.5,
 )

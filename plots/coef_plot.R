@@ -179,16 +179,16 @@ plot_data <- habits_results %>%
 
 # Create the coefficient plot
 coef_plot <- ggplot(plot_data, aes(x = reorder(term_label, estimate), y = estimate, color = is_friday)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "black", size = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black", linewidth = 0.25) +
   geom_errorbar(aes(ymin = ci_lower_display, ymax = ci_upper_display), 
-                width = 0.15, size = 0.8) +
-  geom_point(size = 2) +
-  scale_color_manual(values = c("Friday" = "#D32F2F", "Other" = "black"),
+                width = 0.15, linewidth = 0.7) +
+  geom_point(size = 1.75) +
+  scale_color_manual(values = c("Friday" = "red", "Other" = "black"),
                      guide = "none") +  # Hide legend
   labs(
     title = "",
     x = "",
-    y = "Log(Avg. Weekly Badges\nStudent + 1)",
+    y = "Log(Avg. Weekly\nBadges/Student + 1)",
   ) +
   theme_bw() +
   theme(
@@ -206,6 +206,5 @@ ggsave(
   filename = "/Users/benjaminmanning/Desktop/coefficient_plot.png", 
   plot = coef_plot, 
   width = 8, 
-  height = 2, 
-  dpi = 300
+  height = 2.5,
 )
